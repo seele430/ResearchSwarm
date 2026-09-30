@@ -5,11 +5,11 @@ Orchestrator - 编排所有 Agent 的执行顺序
 from core.state import SwarmState
 from agents.real_agents import (
     planner_agent,
+    researcher_agent,
     analyst_agent,
     writer_agent,
     critic_agent,
 )
-from agents.mock_agents import researcher_agent
 
 def run_swarm(query: str, verbose: bool = True) -> SwarmState:
     """执行完整的多 Agent 流水线"""

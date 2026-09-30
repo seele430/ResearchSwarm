@@ -212,3 +212,57 @@ def critic_agent(state: SwarmState):
         state.log("Critic", f"LLM 调用失败({e})，默认通过")
         state.is_approved = True
         state.critique = f"[评审失败] {e}"
+
+# ============================================================
+# Researcher：并行调研（真实搜索）
+# ============================================================
+
+from concurrent.futures import ThreadPoolExecutor
+from tools import web_search
+
+
+RESEARCHER_PROMPT = """你是一个调研员。用户会给你一个子任务，你需要从搜索结果中提炼关键信息。
+
+要求：
+1. 从搜索结果中筛选出最相关的信息
+2. 提炼关键点，形成简明的调研结论
+3. 保留来源链接（如果有）
+4. 输出 Markdown 格式
+
+不要编造信息。如果搜索结果不相关，直接说明"未找到有效信息"。"""
+
+
+def _research_one_task(task: str) -> tuple[str, str]:
+    """调研单个子任务（供线程池调用）"""
+    try:
+        # 1. 搜索
+        raw = web_search(task, max_results=5)
+
+        # 2. 让 LLM 从搜索结果中提炼
+        result = chat(
+            system_prompt=RESEARCHER_PROMPT,
+            user_prompt=f"""子任务：{task}
+
+搜索结果：
+{raw}
+
+请提炼关键信息。""",
+            temperature=0.3,
+        )
+        return task, result
+    except Exception as e:
+        return task, f"[调研失败] {e}"
+
+
+def researcher_agent(state: SwarmState):
+    """Researcher：并行调研所有子任务"""
+    state.log("Researcher", f"开始调研 {len(state.plan)} 个子任务（并行）")
+
+    # 用线程池并行执行（最多 5 个同时跑）
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(executor.map(_research_one_task, state.plan))
+
+    for task, result in results:
+        state.findings[task] = result
+
+    state.log("Researcher", f"完成 {len(state.findings)} 项调研")
