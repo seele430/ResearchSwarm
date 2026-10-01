@@ -1,72 +1,90 @@
 # ResearchSwarm
 
-> **一个基于多 Agent 协作的深度研究系统：Planner 拆解任务 → 多个 Researcher 并行调研 → Analyst 综合分析 → Writer 撰写报告 → Critic 质量把关，形成完整的"研究-写作-评审"闭环。**
+> **多 Agent 协作的深度研究系统**：Planner 拆解任务 → 多个 Researcher **并行**调研（搜索 + 抓正文）→ Analyst 综合并**报出信息缺口** → Planner 据此**追加子任务再调研一轮** → Writer 撰写报告 → Critic 评审打分，不合格打回重写。
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Multi-Agent](https://img.shields.io/badge/Multi--Agent-5_roles-purple.svg)
+![Tests](https://img.shields.io/badge/tests-92%20passed-brightgreen.svg)
+![Quality](https://img.shields.io/badge/ruff%20%2B%20mypy-clean-blueviolet.svg)
+
 ---
 
-## ✨ Features / 特性
+## ✨ 特性
 
-- **🤖 多 Agent 协作**：5 个角色分工明确（Planner / Researcher / Analyst / Writer / Critic），各司其职
-- **⚡ 并行调研**：多个子任务由线程池并发执行，相比串行提速 3-5 倍
-- **🔄 反馈循环**：Critic 评审不合格会打回 Writer 重写，最多迭代 2 次，保证报告质量
-- **📊 结构化状态**：所有 Agent 共享一份 `SwarmState`，全流程可观测
-- **🌐 真实联网**：Researcher 调用博查搜索 API，不依赖预训练知识
-- **🎯 自我反思**：Critic 带 0-10 评分机制，量化报告质量
-- **📝 完整交付**：含架构图、示例报告、决策日志、性能对比
+以下每条都对应代码里的**可验证行为**，括号里是验证方式：
+
+### 编排：不只是单向流水线
+
+- **5 个角色 + 补研回边**：Analyst 输出结构化的 `gaps`（信息缺口）→ Planner 把缺口改写成**可检索的新子任务** → Researcher 只对「新增 + 失败重试」项再跑一轮（`MAX_RESEARCH_ROUNDS`，默认 1 轮）。
+  *验证：`tests/test_replan.py` 断言第二轮只调研新增项、轮次被上限封顶。*
+- **评审闭环语义明确**：Critic 打 0–10 分；`MAX_REVISIONS = 2` 的确切含义是**最多重写 2 次**（Writer 最多被调用 3 次）。
+  *验证：`tests/test_review_loop.py` 断言 `writer_calls == [0, 1, 2]`。*
+
+### 调研质量
+
+- **并行调研**：`ThreadPoolExecutor`，并发度由 `RESEARCH_MAX_WORKERS` 控制。
+- **正文抓取**：每个子任务对排名靠前的结果**抓正文**（trafilatura → BeautifulSoup 两级降级），失败则退回摘要并**在 prompt 里如实标注**「正文抓取失败」。
+- **可核验来源**：搜索结果带编号进入 prompt；报告末尾由程序追加 `## 参考来源` 清单 —— URL 直接取自搜索 API，**不经过模型生成**，模型漏写也不会导致报告没有出处。
+  *验证：`tests/test_sources.py` 断言正文进入 prompt、抓取失败退化、重复 URL 去重、报告末尾有真实链接。*
+- **失败显式记账**：搜索/提炼失败写入 `state.failures` 并作为「信息缺口」传给 Analyst/Writer，**绝不把报错文本当成调研结果**喂给模型。
+  *验证：`tests/test_research_failures.py` 断言 `test_error_text_never_leaks_into_findings`。*
+
+### 工程
+
+- **结构化输出加固**：`core/jsonx.py` 采用「多候选提取 + 括号配对扫描 + 字段校验」，`"approved": "true"`、`"score": "9"`、内容里含 ``` 都能正确解析。
+  *验证：`tests/test_json_parsing.py`（27 个用例）。*
+- **可观测**：`history` 带时间戳与每步耗时，token 用量自动计量，运行结束用 rich 打汇总表。
+- **工程质量**：92 个 pytest 用例、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
+
 ---
 
-## 🏗️ Architecture / 架构
+## 🏗️ 架构
 
 ```
-                       用户提问
-                          │
-                          ▼
-        ┌─────────────────────────────────────┐
-        │       Orchestrator（编排器）        │
-        │  - 管理共享状态 SwarmState          │
-        │  - 调度 Agent 执行顺序              │
-        │  - 控制评审-重写循环                │
-        └─────────────────────────────────────┘
-                          │
-        ┌─────────────────┼─────────────────┐
-        ▼                 ▼                 ▼
-   ┌─────────┐      ┌──────────┐      ┌──────────┐
-   │ Planner │ ───▶ │Researcher│ ───▶ │ Analyst  │
-   │ 拆解任务 │      │ 并行调研  │      │ 综合分析  │
-   └─────────┘      └──────────┘      └──────────┘
-                          │
-                          ▼
-                  ┌───────────────┐
-                  │ Writer ⇄ Critic│
-                  │ 撰写 ⇄ 评审    │
-                  │ （最多迭代 2 次）│
-                  └───────────────┘
-                          │
-                          ▼
-                    最终研究报告
+                        用户提问
+                           │
+                           ▼
+        ┌──────────────────────────────────────┐
+        │      Orchestrator（编排器）           │
+        │  · 共享状态 SwarmState               │
+        │  · 调度 Agent、计时、统计 token       │
+        └──────────────────────────────────────┘
+                           │
+      ┌────────────────────┼────────────────────┐
+      ▼                    ▼                    ▼
+ ┌─────────┐         ┌──────────┐        ┌──────────┐
+ │ Planner │ ──────▶ │Researcher│ ─────▶ │ Analyst  │
+ │ 拆解任务 │         │ 并行调研  │        │ 分析+报缺口│
+ └─────────┘         └──────────┘        └────┬─────┘
+      ▲                                        │
+      │           ① 有缺口 / 有失败             │
+      └──────── Planner(补研) ◀────────────────┘
+                 只调研「新增 + 失败重试」项
+                                               │
+                                               ▼
+                                    ┌───────────────────┐
+                                    │  Writer ⇄ Critic  │
+                                    │  撰写 ⇄ 评审打分   │
+                                    │  最多重写 MAX_REVISIONS 次 │
+                                    └───────────────────┘
+                                               │
+                                               ▼
+                                    最终报告（附来源清单）
 ```
 
-### 5 个 Agent 的职责
+### 5 个角色的职责
 
 | Agent | 职责 | 输入 | 输出 |
 |-------|------|------|------|
-| **Planner** | 把用户问题拆解成 3-5 个可执行的子任务 | 用户问题 | 子任务列表 |
-| **Researcher** | 对每个子任务**并行**搜索 + 提炼关键信息 | 子任务列表 | 调研结果 |
-| **Analyst** | 综合分析所有调研结果，识别矛盾 | 调研结果 | 结构化分析 |
-| **Writer** | 撰写结构化研究报告 | 分析内容 | 报告草稿 |
-| **Critic** | 评审报告质量（0-10 评分） | 报告草稿 | 评审意见 + 是否通过 |
+| **Planner** | 把问题拆成 3–5 个可执行子任务；补研轮把缺口改写成新子任务 | 用户问题 / 缺口列表 | 子任务列表 |
+| **Researcher** | 对每个子任务**并行**搜索 + 抓正文 + 提炼 | 子任务列表 | 调研结论 + 来源 |
+| **Analyst** | 综合所有材料、识别矛盾、**报出信息缺口** | 调研结论 + 来源 | `analysis` + `gaps` |
+| **Writer** | 撰写结构化报告，按 `[编号]` 标注引用 | 分析 + 来源 | 报告草稿 |
+| **Critic** | 评审报告（0–10 分），不合格打回 | 报告草稿 | 评审意见 + 是否通过 |
 
-### 核心设计
-
-- **共享状态**：所有 Agent 读写同一份 `SwarmState`，无需点对点通信
-- **流水线 + 闭环**：前 3 步是流水线（Planner → Researcher → Analyst），后 2 步是闭环（Writer ⇄ Critic）
-- **可观测**：每一步都有 `history` 日志，可回溯整个执行过程
 ---
 
-## 🚀 Quick Start / 快速开始
+## 🚀 快速开始
 
 ### 1. 环境要求
 
@@ -81,17 +99,17 @@ git clone https://github.com/seele430/ResearchSwarm.git
 cd ResearchSwarm
 
 python -m venv venv
-# Windows
-venv\Scripts\activate
-# Mac/Linux
-source venv/bin/activate
+# Windows: venv\Scripts\activate
+# macOS/Linux: source venv/bin/activate
 
-pip install -r requirements.txt
+pip install -r requirements.txt          # 仅运行时
+# 或者装开发依赖（含 pytest / ruff / mypy）
+pip install -r requirements-dev.txt
 ```
 
 ### 3. 配置
 
-复制 `.env.example` 为 `.env`，填入你自己的密钥：
+复制 `.env.example` 为 `.env`，填入自己的密钥：
 
 ```env
 LLM_API_KEY=your_llm_api_key_here
@@ -104,135 +122,128 @@ BOCHA_API_KEY=your_bocha_api_key_here
 
 ```bash
 python main.py
+# 输入研究问题，例如：AI Agent 的发展趋势
 ```
 
-然后输入你的研究问题，例如：
+报告会保存到 `notes/`（文件名已做净化与去重，含`:?*`的问题不会崩，重复运行不会互相覆盖）。
 
-```
-AI Agent 的发展趋势
-```
----
+### 5. 不想花 API 额度？跑离线演示
 
-## 📖 Usage / 使用示例
-
-### 示例问题
-
-```
-AI Agent 的发展趋势
+```bash
+python -m scripts.demo_offline     # 用假 LLM 客户端跑真实流水线（含补研回边）
 ```
 
-### 输出示例
-
-完整示例报告见 [examples/sample-report.md](examples/sample-report.md)。
-
-节选：
-
-> **## 七、结论**
-> AI Agent 的发展趋势可概括为 **"技术框架已定、落地仍在爬坡、风险贯穿全链、B 端先行突破"**。
->
-> 行业共识大于分歧，核心不确定性集中在两个问题上：
-> 1. **规划模块能否在复杂场景中达到可靠阈值** —— 这决定技术可行性向工程可靠性的跨越
-> 2. **商业模式能否从试点走向规模化付费** —— 这决定"有前景的技术"能否变为"有规模的市场"
-
-**注意报告的结构化输出——它主动识别了核心不确定性，而不是简单罗列信息。**
 ---
 
-## 🧠 Design Decisions / 设计决策
+## 📊 性能：并联 vs 串联
 
-本项目记录了完整的工程决策过程。核心决策包括：
+数字**不再是手工填的**，由 `scripts/bench_research.py` 实测产出：
 
-| # | 决策 | 核心权衡 |
-|---|------|---------|
-| 001 | 5 个 Agent 的职责划分 | 太少则协作不足，太多则通信复杂 |
-| 002 | 共享 State 而非消息传递 | 简单、可观测，但不适合超大规模系统 |
-| 003 | 并行调研（ThreadPoolExecutor） | 提速 3-5 倍，但受 API 限流影响 |
-| 004 | Critic 反馈循环 + 最多 2 次重写 | 保证质量，但增加 token 消耗 |
-| 005 | 结构化 JSON 输出（Planner/Critic） | 便于程序解析，但要处理 LLM 输出不稳定 |
+| 模式 | 实现方式 | 耗时 | 加速比 | 成功/失败 |
+|------|---------|------|--------|-----------|
+| 串联 | `ThreadPoolExecutor(max_workers=1)` | 12.01 s | 1.00x | 5/0 |
+| 并联 | `ThreadPoolExecutor(max_workers=5)` | 2.40 s | **5.00x** | 5/0 |
 
-**为什么记录决策？** 因为"做了什么"容易看到，"为什么这么做"才是工程价值的核心。
+> 条件：离线桩（固定延迟：搜索 0.8s / 抓正文 0.3s / 提炼 1.0s）、5 个子任务、2 次取中位数、Python 3.12.7。
+> 完整表格见 [`docs/benchmark.md`](docs/benchmark.md)；复现：`python -m scripts.bench_research --tasks 5 --repeat 2`
 
----
----
+### 为什么真实 API 下远达不到 5x？
 
-## ⚡ Performance / 性能对比
+离线桩测的是**调度效率的上界**。真实环境还要受下游服务影响 —— 本项目早期在真实 API 下的实测是 **46 秒 → 23 秒（2.0x）**：
 
-Researcher 阶段对 5 个子任务进行调研（每个任务 = 搜索 + LLM 提炼）。实测对比：
+1. 搜索 API 对同一 IP 有并发限制
+2. 多个请求共享同一出口带宽
+3. 子任务耗时不均，快的要等慢的
 
-| 模式 | 实现方式 | Researcher 耗时 | 加速比 |
-|------|---------|----------------|--------|
-| **串行** | `ThreadPoolExecutor(max_workers=1)` | 46 秒 | 1.0x |
-| **并行** | `ThreadPoolExecutor(max_workers=5)` | 23 秒 | **2.0x** |
+**结论**：并行不是免费的，`RESEARCH_MAX_WORKERS` 要按下游承载能力来设。
 
-> 测试问题：「AI Agent 的发展趋势」，5 个子任务，同一网络环境。
-
-### 为什么加速比不是 5x？
-
-理论上 5 个 worker 并行应该接近 5x 加速，实际只有 2x，原因：
-
-1. **API 限流**：搜索 API 对同一 IP 有并发限制
-2. **网络带宽**：5 个请求同时走一个出口，存在排队
-3. **任务不均衡**：不同子任务的搜索 + LLM 提炼耗时不同，快的要等慢的
-
-**结论**：并行不是免费的——要考虑下游服务的承载能力。
+```bash
+# 用真实 API 测（会消耗 token）
+python -m scripts.bench_research --live --tasks 5
+```
 
 ---
+
+## 🧪 测试与质量
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q          # 92 passed
+ruff check .       # All checks passed!
+mypy               # Success: no issues found in 10 source files
+```
+
+| 测试文件 | 覆盖内容 |
+|---|---|
+| `test_dependencies.py` | **代码 import 的依赖必须在 requirements 里声明**（防"全新安装就 ImportError"） |
+| `test_json_parsing.py` | 代码块/夹带正文/含 ``` 的 JSON、布尔与分数容错、Planner 降级 |
+| `test_utils.py` | 文件名净化（非法字符、保留设备名、长度、去重） |
+| `test_research_failures.py` | 搜索失败不入 findings、重试、部分失败保留成功项、缺口注入 prompt |
+| `test_review_loop.py` | Writer⇄Critic 轮次语义、Critic 不推进计数、评审失败 fail-open |
+| `test_sources.py` | 正文抓取、抓取失败退化、来源去重、报告来源清单 |
+| `test_observability.py` | 时间戳/耗时、token 计量（含并发累加）、汇总表 |
+| `test_replan.py` | 补研回边：触发条件、轮次上限、失败重试与撤销 |
+| `test_pipeline_offline.py` | 离线端到端：五角色齐全、报告带真实来源 |
+
+CI 见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)（Python 3.10 / 3.12 矩阵）。
+
 ---
 
-## 🛠️ Tech Stack / 技术栈
-
-| 类别 | 技术 |
-|------|------|
-| 语言 | Python 3.10+ |
-| 架构模式 | Multi-Agent · Plan-and-Execute · 反馈循环 |
-| 并发 | `concurrent.futures.ThreadPoolExecutor` |
-| LLM | DeepSeek API（OpenAI 兼容 SDK） |
-| 搜索 | 博查 Bocha API |
-| 网页解析 | requests · trafilatura · BeautifulSoup4 · lxml |
-| 配置 | python-dotenv |
-
-**说明**：
-- 本项目**不依赖 LangChain / LangGraph**，Agent 编排、状态管理、反馈循环全部手写
-- 与作者的另一项目 [DeepResearch](https://github.com/seele430/DeepResearch) 形成对比：一个是**单 Agent + ReAct**，一个是**多 Agent + Plan-and-Execute**
-
----
----
-
-## 📁 Project Structure / 项目结构
+## 📁 项目结构
 
 ```
 ResearchSwarm/
-├── main.py                     # 入口：输入问题、运行流水线、保存报告
+├── main.py                      # 入口：提问、跑流水线、保存报告、打印日志与汇总
 ├── agents/
-│   ├── real_agents.py          # 5 个 Agent 的真实实现（LLM + 工具）
-│   └── mock_agents.py          # Mock 版（Day 1 验证用，保留作参考）
+│   ├── __init__.py
+│   └── real_agents.py           # 5 个角色的真实实现（prompt + 工具 + 降级策略）
 ├── core/
-│   ├── state.py                # SwarmState：所有 Agent 共享的状态
-│   ├── llm.py                  # LLM 调用封装
-│   └── orchestrator.py         # 编排器：调度 Agent 执行顺序
-├── tools.py                    # 工具集（搜索、网页抓取、笔记保存）
-├── examples/
-│   └── sample-report.md        # 示例报告
-├── notes/                      # 每次运行的报告自动存档（gitignore）
+│   ├── __init__.py
+│   ├── state.py                 # SwarmState：共享状态 + 观测数据（history/usage/sources）
+│   ├── llm.py                   # LLM 客户端（超时/重试）+ 线程安全 token 计量
+│   ├── jsonx.py                 # 结构化输出解析与校验（Planner/Analyst/Critic 共用）
+│   ├── orchestrator.py          # 编排：主线 + 补研回边 + 评审闭环 + 计时
+│   └── utils.py                 # 文件名净化与路径去重
+├── tools.py                     # 工具集：搜索 / 正文抓取 / 笔记（失败一律抛异常）
+├── scripts/
+│   ├── bench_research.py        # 并联 vs 串联的可复现测量
+│   ├── demo_offline.py          # 无 API Key 的离线演示
+│   ├── smoke_llm.py             # 手工冒烟：真实调一次 LLM
+│   └── smoke_search.py          # 手工冒烟：真实调一次搜索
+├── tests/                       # 92 个 pytest 用例
+├── docs/benchmark.md            # 由脚本生成的性能表格
+├── examples/sample-report.md    # 示例报告
+├── notes/                       # 运行产物（gitignore）
+├── pyproject.toml               # ruff / mypy 配置
+├── pytest.ini
 ├── requirements.txt
-├── .env.example
-├── .gitignore
-├── DECISIONS.md                # 工程决策日志
+├── requirements-dev.txt
+├── DECISIONS.md                 # 工程决策日志（001–010）
 └── README.md
 ```
 
 ---
+
+## 🧠 设计决策
+
+完整的「为什么这么做、代价是什么」见 [`DECISIONS.md`](DECISIONS.md)：Agent 数量取舍、共享状态 vs 消息传递、并行度、评审闭环、结构化输出、失败记账、来源可核验、补研回边、可观测口径。
+
 ---
 
-## 🗺️ Roadmap / 后续计划
+## 🗺️ Roadmap
 
-- [ ] **Web UI**：用 Streamlit / FastAPI 展示 Agent 实时协作过程
-- [ ] **持久化记忆**：把 `SwarmState` 存入数据库，支持中断恢复
-- [ ] **动态 Agent 数量**：根据问题复杂度自动决定 Planner 拆几个子任务、启几个 Researcher
-- [ ] **更多工具**：接入 PDF 解析、代码执行、图表生成
+- [x] **补研回边**：Analyst 报缺口 → Planner 追加子任务再调研（真正的多 Agent 协作）
+- [x] **可观测**：每步耗时、token 用量、执行日志带时间戳
+- [x] **可复现性能测量**：`scripts/bench_research.py`
+- [x] **测试与 CI**：92 个用例 + ruff/mypy + 双版本矩阵
+- [ ] **Web UI**：Streamlit / FastAPI 展示 Agent 实时协作过程
+- [ ] **持久化记忆**：`SwarmState` 落库，支持中断恢复
+- [ ] **更多工具**：PDF 解析、代码执行、图表生成
 - [ ] **评估体系**：用 RAGAS 等框架量化报告质量
-- [ ] **Human-in-the-loop**：关键节点允许人工介入调整
+- [ ] **Human-in-the-loop**：关键节点允许人工介入
 
 ---
+
 ## 📄 License
 
 MIT
@@ -244,7 +255,4 @@ MIT
 - [DeepSeek](https://platform.deepseek.com) — LLM 服务
 - [博查 Bocha](https://open.bochaai.com) — 搜索 API
 - [trafilatura](https://github.com/adbar/trafilatura) — 网页正文提取
-
----
-
-**如果这个项目对你有帮助，欢迎 Star ⭐**
+- [rich](https://github.com/Textualize/rich) — 终端汇总表
