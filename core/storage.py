@@ -192,3 +192,19 @@ class RunStore:
     def count(self) -> int:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+
+    # ------------------------------------------------------------------ 删
+    def delete(self, run_id: str) -> bool:
+        """删除一条运行记录（连同它的步骤明细）；返回是否真的删到了。"""
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
+            conn.execute("DELETE FROM steps WHERE run_id = ?", (run_id,))
+            return cursor.rowcount > 0
+
+    def clear(self) -> int:
+        """清空全部历史，返回删掉了多少条。"""
+        with self._lock, self._connect() as conn:
+            removed = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+            conn.execute("DELETE FROM runs")
+            conn.execute("DELETE FROM steps")
+            return removed

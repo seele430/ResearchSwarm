@@ -15,6 +15,8 @@
 | GET | `/api/runs/{run_id}/events` | **SSE** 事件流；先回放缓冲，再增量推送，结束时发 `event: end` |
 | POST | `/api/runs/{run_id}/cancel` | 请求取消 → `{"ok": true, "status": "cancelling"}`；已结束则 `{"ok": false, ...}` |
 | GET | `/api/history?limit=20` | 归档历史（SQLite，按结束时间倒序；列表不含报告正文） |
+| DELETE | `/api/runs/{run_id}` | 删除一条历史 → `{"deleted": true, "run_id": ..., "total": N}`；未知 id 返回 404；**运行中的任务返回 409**（需先停止） |
+| DELETE | `/api/history` | 清空全部历史 → `{"deleted": N, "total": 0, "active_run": ...}`；正在运行的任务不受影响，结束后仍会归档 |
 | GET | `/api/runs/{run_id}/export` | 导出 Markdown 附件（报告 + 来源清单 + 用量元信息） |
 | GET | `/api/config` | 当前配置（**只含密钥掩码**，无明文） |
 | PUT | `/api/config` | 保存配置（`api_key` / `base_url` / `model`，只更新传入的字段） |

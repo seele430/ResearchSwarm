@@ -194,6 +194,18 @@ class RunRegistry:
                 return record
         return None
 
+    def find(self, run_id: str) -> RunRecord | None:
+        """按 id 取记录；不存在返回 None（不抛 404，供删除逻辑判断）。"""
+        with self._lock:
+            return self._runs.get(run_id)
+
+    def forget(self, run_id: str) -> None:
+        """从内存中移除一条记录（历史被删除后调用，避免还能从内存里读到）。"""
+        with self._lock:
+            self._runs.pop(run_id, None)
+            if run_id in self._order:
+                self._order.remove(run_id)
+
 
 registry = RunRegistry()
 
@@ -309,6 +321,32 @@ def history(limit: int = 20) -> dict[str, Any]:
     limit = max(1, min(limit, 100))
     store = get_store()
     return {"runs": store.list(limit), "total": store.count()}
+
+
+@app.delete("/api/runs/{run_id}")
+def delete_run(run_id: str) -> dict[str, Any]:
+    """删除一条历史记录（正在运行的任务需先停止）。"""
+    record = registry.find(run_id)
+    if record is not None and record.status == "running":
+        raise HTTPException(status_code=409, detail="该任务正在运行，请先停止再删除")
+
+    deleted = get_store().delete(run_id)
+    registry.forget(run_id)  # 内存里也一并移除，否则 GET 还能读到
+    if not deleted and record is None:
+        raise HTTPException(status_code=404, detail=f"没有这条历史记录：{run_id}")
+    return {"deleted": True, "run_id": run_id, "total": get_store().count()}
+
+
+@app.delete("/api/history")
+def clear_history() -> dict[str, Any]:
+    """清空全部历史；正在运行的任务不受影响（它结束后仍会被记录）。"""
+    removed = get_store().clear()
+    active = registry.active()
+    return {
+        "deleted": removed,
+        "total": get_store().count(),
+        "active_run": active.run_id if active is not None else None,
+    }
 
 
 @app.get("/api/config")

@@ -250,3 +250,44 @@ def test_history_row_is_retrievable_after_registry_is_cleared(client):
     assert body["archived"] is True
     assert body["query"] == "持久化测试"
     assert body["report"]
+
+
+# --------------------------------------------- M4：删除单条历史 / 清空全部历史
+def test_delete_single_history_entry(client):
+    run_id = client.post("/api/runs", json={"query": "待删除的历史"}).json()["run_id"]
+    _wait_finished(client, run_id)
+    assert any(row["run_id"] == run_id for row in client.get("/api/history").json()["runs"])
+
+    response = client.delete(f"/api/runs/{run_id}")
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+
+    # 内存与归档里都要消失，否则 GET 还能读到
+    assert client.get(f"/api/runs/{run_id}").status_code == 404
+    assert not any(row["run_id"] == run_id for row in client.get("/api/history").json()["runs"])
+
+
+def test_delete_unknown_run_returns_404(client):
+    assert client.delete("/api/runs/no-such-run").status_code == 404
+
+
+def test_clear_history_removes_everything(client):
+    for index in range(2):
+        run_id = client.post("/api/runs", json={"query": f"清空测试 {index}"}).json()["run_id"]
+        _wait_finished(client, run_id)
+    assert client.get("/api/history").json()["total"] >= 2
+
+    body = client.delete("/api/history").json()
+    assert body["deleted"] >= 2
+    assert body["total"] == 0
+    assert body["active_run"] is None
+    assert client.get("/api/history").json()["runs"] == []
+
+
+def test_running_run_cannot_be_deleted(slow_client):
+    run_id = slow_client.post("/api/runs", json={"query": "运行中不允许删除"}).json()["run_id"]
+    response = slow_client.delete(f"/api/runs/{run_id}")
+
+    assert response.status_code == 409
+    assert "正在运行" in response.json()["detail"]
+    slow_client.post(f"/api/runs/{run_id}/cancel")

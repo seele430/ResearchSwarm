@@ -89,3 +89,30 @@ def test_to_markdown_handles_a_run_without_report():
     assert "# 空跑" in markdown
     assert "（没有产出报告）" in markdown
     assert "## 参考来源" not in markdown
+
+
+def test_delete_removes_one_run(tmp_path):
+    store = RunStore(tmp_path / "runs.db")
+    store.save("a", DETAIL)
+    store.save("b", DETAIL)
+
+    assert store.delete("a") is True
+    assert store.get("a") is None
+    assert store.count() == 1
+    assert [row["run_id"] for row in store.list()] == ["b"]
+
+
+def test_delete_unknown_run_returns_false(tmp_path):
+    assert RunStore(tmp_path / "runs.db").delete("does-not-exist") is False
+
+
+def test_clear_wipes_everything_and_reports_the_count(tmp_path):
+    store = RunStore(tmp_path / "runs.db")
+    for run_id in ("a", "b", "c"):
+        store.save(run_id, DETAIL)
+
+    assert store.clear() == 3
+    assert store.count() == 0
+    assert store.list() == []
+    assert store.get("a") is None
+    assert store.clear() == 0  # 再清一次是幂等的
