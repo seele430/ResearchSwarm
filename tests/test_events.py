@@ -19,6 +19,7 @@ import pytest
 
 from agents import real_agents
 from core import orchestrator
+from core.state import SwarmState
 from service.events import RunEvent, null_sink
 from tools import SearchResult
 
@@ -58,7 +59,7 @@ def _install_offline_stubs(monkeypatch) -> None:
 
 def _collect_events(
     monkeypatch, cancel: threading.Event | None = None
-) -> tuple[object, list[RunEvent]]:
+) -> tuple[SwarmState, list[RunEvent]]:
     """跑一次离线流程，返回 (state, [事件...])。"""
     _install_offline_stubs(monkeypatch)
     events: list[RunEvent] = []

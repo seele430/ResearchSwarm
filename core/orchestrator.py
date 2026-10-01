@@ -14,6 +14,7 @@ CLI / FastAPI / 桌面窗口各自决定怎么渲染。取消通过 `threading.E
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import asdict
 from threading import Event
 
@@ -42,7 +43,7 @@ def _usage_dict() -> dict[str, int]:
 def run_swarm(
     query: str,
     verbose: bool = False,
-    on_event: EventSink | None = None,
+    on_event: EventSink | Callable[[RunEvent], None] | None = None,
     cancel: Event | None = None,
 ) -> SwarmState:
     """执行完整的多 Agent 流水线（含补研回边与评审闭环）。
