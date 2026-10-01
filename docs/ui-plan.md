@@ -54,7 +54,7 @@ agents/ tools.py 真实 Agent 与工具层
 | **M1**（✅ 2026-10-01） | 事件契约 + 编排器去 print + 取消 + CLI 前端迁移 | 测试全绿；取消事件生效且不执行后续步骤；CLI 输出与改造前一致 |
 | **M2**（✅ 后端完成 / 🔸 前端待迭代） | `app/api.py`（FastAPI）+ SSE + `web/index.html` | 后端实测通过：静态前端与 API 共存、事件流完整、取消在步骤边界生效、并发 409；前端样式由用户继续打磨 |
 | **M3**（✅ 2026-10-01） | `app/desktop.py`（pywebview）+ PyInstaller + 图标 + 单实例 | 实测：双击 exe 出窗口、内部服务正常、**在 exe 里跑通完整流水线**（含补研回边）、重复双击被拦截、日志落 `%LOCALAPPDATA%` |
-| **M4** | SQLite 运行历史、导出 Markdown、token 成本统计、**配置界面（填 API Key）** | 历史可查；无 API Key 也能完整演示一次运行（`--demo` 已提前实现，配置界面待做） |
+| **M4**（✅ 2026-10-01） | 设置面板（API Key / Base URL / 模型）· 演示模式一键切换 · SQLite 运行历史 · Markdown 导出 | 实测（含打包后的 exe）：配置只回传掩码、演示模式可切回真实调用、运行自动归档（重启后仍可查）、导出为 Markdown 附件 |
 
 ## 分工
 

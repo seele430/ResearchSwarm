@@ -1,15 +1,16 @@
 """统一的 LLM 调用封装：客户端配置 + token 用量统计。
 
-两点改进：
+三点改进：
 
 1. **显式 timeout / max_retries** —— OpenAI SDK 默认超时 600s，对 CLI 工具太宽松；
 2. **用量计量**：每次调用把 `response.usage` 累加进全局 `USAGE`。
-   Researcher 走线程池并发调用，所以累加必须加锁。
+   Researcher 走线程池并发调用，所以累加必须加锁；
+3. **配置来自 `core.config`**（`%APPDATA%\\ResearchSwarm\\config.json` 优先，其次环境变量/.env），
+   并且客户端**懒加载**：没配 Key 也能启动应用，只在真正调用时报可操作的错。
 """
 
 from __future__ import annotations
 
-import os
 import threading
 from dataclasses import replace
 from typing import Any
@@ -17,6 +18,7 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from core.config import get_api_key, get_base_url, get_model
 from core.state import UsageStat
 
 load_dotenv()
@@ -69,33 +71,47 @@ USAGE = UsageMeter()
 # 会直接抛异常，导致整个应用打不开 —— 而正确行为是「能启动，跑的时候再报可操作的错」。
 # 测试与离线演示会直接给 _client 赋值一个假客户端，懒加载逻辑要优先认它。
 _client: OpenAI | None = None
-_MODEL = (os.getenv("LLM_MODEL") or "").strip()
+_client_key: str | None = None  # 建这个客户端时用的 key；变了就重建（设置里改了 Key 要立刻生效）
 
 
 def _model_name() -> str:
     """模型名缺失时给出可操作的报错，而不是把 None 发给 API。"""
-    if not _MODEL:
-        raise RuntimeError("缺少 LLM_MODEL 配置：请在 .env 中设置（示例见 .env.example）")
-    return _MODEL
+    model = get_model()
+    if not model:
+        raise RuntimeError(
+            "缺少模型配置（LLM_MODEL）：可在桌面版「设置」里填写，"
+            "或写入 .env（示例见 .env.example）"
+        )
+    return model
 
 
 def _get_client() -> OpenAI:
-    """取（必要时创建）LLM 客户端；密钥缺失时给出能照着做的报错。"""
-    global _client
-    if _client is not None:
+    """取（必要时创建）LLM 客户端。
+
+    - 配置来自 `core.config`：config.json 优先，其次环境变量/.env
+    - 若 `_client` 已被外部替换（测试、离线演示），直接沿用，不覆盖
+    - 界面上换了 Key → `_client_key` 不匹配 → 自动重建
+    """
+    global _client, _client_key
+    api_key = get_api_key()
+
+    if _client is not None and (_client_key is None or _client_key == api_key):
         return _client
-    api_key = os.getenv("LLM_API_KEY")
+
     if not api_key:
         raise RuntimeError(
-            "缺少 LLM_API_KEY 配置：请在 .env 或环境变量中设置你的 API Key。"
-            "（想先体验完整流程可以不配密钥，用离线演示模式：python -m app.desktop --demo）"
+            "还没有配置 API Key：请在桌面版「设置」里填写，或写入环境变量/`.env`。"
+            "（想先体验完整流程，可开启演示模式："
+            "设置里切换，或 python -m app.desktop --demo）"
         )
+
     _client = OpenAI(
         api_key=api_key,
-        base_url=os.getenv("LLM_BASE_URL"),
+        base_url=get_base_url() or None,
         timeout=DEFAULT_TIMEOUT,
         max_retries=DEFAULT_MAX_RETRIES,
     )
+    _client_key = api_key
     return _client
 
 

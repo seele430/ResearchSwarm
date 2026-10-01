@@ -53,9 +53,18 @@ def _install_stubs(monkeypatch, *, delay: float = 0.0) -> None:
 
 
 @pytest.fixture()
-def client(monkeypatch):
-    """离线桩 + TestClient；退出时确保没有运行线程被遗留到测试之外。"""
+def client(tmp_path, monkeypatch):
+    """离线桩 + TestClient。
+
+    - 配置与归档库都重定向到 tmp_path，**绝不碰用户真实的 %APPDATA%/%LOCALAPPDATA%**
+    - 退出时确保没有运行线程被遗留到测试之外
+    """
+    from core import config as app_config
+    from core.storage import RunStore
+
     _install_stubs(monkeypatch)
+    monkeypatch.setattr(app_config, "config_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr(api, "_store", RunStore(tmp_path / "runs.db"))
     with TestClient(api.app) as test_client:
         yield test_client
     active = api.registry.active()
@@ -65,9 +74,14 @@ def client(monkeypatch):
 
 
 @pytest.fixture()
-def slow_client(monkeypatch):
-    """每次 LLM 调用慢 0.15s，用来制造「运行中」这个窗口。"""
+def slow_client(tmp_path, monkeypatch):
+    """每次 LLM 调用慢 0.15s，用来制造「运行中」这个窗口；配置/归档同样重定向到 tmp。"""
+    from core import config as app_config
+    from core.storage import RunStore
+
     _install_stubs(monkeypatch, delay=0.15)
+    monkeypatch.setattr(app_config, "config_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr(api, "_store", RunStore(tmp_path / "runs.db"))
     with TestClient(api.app) as test_client:
         yield test_client
     active = api.registry.active()
@@ -164,3 +178,75 @@ def test_unknown_run_id_returns_404(client):
 
 def test_empty_query_is_rejected_by_validation(client):
     assert client.post("/api/runs", json={"query": ""}).status_code == 422
+
+
+# ----------------------------------------------------------- M4：配置与归档
+def test_config_get_put_and_verify_never_leaks_the_key(client):
+    initial = client.get("/api/config").json()
+    assert "config_path" in initial
+
+    saved = client.put("/api/config", json={"api_key": "sk-abcdefghijklmnop"}).json()
+    assert saved["has_api_key"] is True
+    assert saved["source"] == "config.json"  # 界面填的值优先于环境变量
+    assert saved["api_key_masked"].startswith("sk-a")
+    assert "sk-abcdefghijklmnop" not in json.dumps(saved, ensure_ascii=False)
+
+    # 落盘后再读一次，仍然是掩码
+    assert client.get("/api/config").json()["api_key_masked"].startswith("sk-a")
+
+    # 验证接口用一次极小调用确认配置可用（测试里走的是桩客户端）
+    verified = client.post("/api/config/verify").json()
+    assert verified["ok"] is True
+
+
+def test_demo_toggle_is_idempotent_and_restores_state(client):
+    assert client.get("/api/demo").json()["enabled"] is False
+
+    turned_on = client.post("/api/demo", json={"enabled": True}).json()
+    assert turned_on["enabled"] is True and turned_on["changed"] is True
+
+    again = client.post("/api/demo", json={"enabled": True}).json()
+    assert again["changed"] is False  # 幂等
+
+    turned_off = client.post("/api/demo", json={"enabled": False}).json()
+    assert turned_off["enabled"] is False and turned_off["changed"] is True
+
+
+def test_finished_run_is_archived_and_appears_in_history(client):
+    run_id = client.post("/api/runs", json={"query": "归档测试"}).json()["run_id"]
+    detail = _wait_finished(client, run_id)
+    assert detail["status"] == "finished"
+    assert detail["finished_at"]  # 归档需要结束时间
+
+    history = client.get("/api/history").json()
+    assert history["total"] >= 1
+    assert any(row["run_id"] == run_id for row in history["runs"])
+    assert history["runs"][0]["query"]
+
+
+def test_export_endpoint_returns_markdown_attachment(client):
+    run_id = client.post("/api/runs", json={"query": "导出测试"}).json()["run_id"]
+    _wait_finished(client, run_id)
+
+    response = client.get(f"/api/runs/{run_id}/export")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert "attachment" in response.headers["content-disposition"]
+    assert "# 导出测试" in response.text
+    assert "## 参考来源" in response.text
+
+
+def test_history_row_is_retrievable_after_registry_is_cleared(client):
+    """模拟「进程重启」：内存注册表清空后，历史仍能从 SQLite 读回。"""
+    run_id = client.post("/api/runs", json={"query": "持久化测试"}).json()["run_id"]
+    _wait_finished(client, run_id)
+
+    api.registry._runs.clear()  # 直接清掉内存记录，模拟重启
+    api.registry._order.clear()
+
+    archived = client.get(f"/api/runs/{run_id}")
+    assert archived.status_code == 200
+    body = archived.json()
+    assert body["archived"] is True
+    assert body["query"] == "持久化测试"
+    assert body["report"]

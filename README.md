@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Tests](https://img.shields.io/badge/tests-107%20passed-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-126%20passed-brightgreen.svg)
 ![Quality](https://img.shields.io/badge/ruff%20%2B%20mypy-clean-blueviolet.svg)
 
 ---
@@ -34,7 +34,7 @@
 - **结构化输出加固**：`core/jsonx.py` 采用「多候选提取 + 括号配对扫描 + 字段校验」，`"approved": "true"`、`"score": "9"`、内容里含 ``` 都能正确解析。
   *验证：`tests/test_json_parsing.py`（27 个用例）。*
 - **可观测**：`history` 带时间戳与每步耗时，token 用量自动计量，运行结束用 rich 打汇总表。
-- **工程质量**：112 个 pytest 用例（107 通过 + 5 个事件契约用例待补齐）、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
+- **工程质量**：131 个 pytest 用例（126 通过 + 5 个事件契约用例待补齐）、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
 
 ---
 
@@ -195,7 +195,12 @@ venv\Scripts\python.exe scripts\build_exe.py
 - **动态端口**：默认 8756，被占用时自动换；实际端口写入 `%LOCALAPPDATA%\ResearchSwarm\last-run.json`
 - **无控制台也能排查**：标准流被接到 `%LOCALAPPDATA%\ResearchSwarm\logs\desktop.log`
 - **打包要点**（都写进 `scripts/build_exe.py` 了）：`--add-data web;web` 带前端、`--collect-all webview` 带 WebView2 的 .NET DLL、`--collect-data trafilatura` 带抓正文的数据文件、uvicorn 的多个动态导入用 `--hidden-import` 显式声明；排查启动异常时加 `--console` 出控制台版
-- **已知边界**：exe 尚未签名，首次运行 Windows SmartScreen 可能提示；配置界面（填 API Key）在 M4
+- **已知边界**：exe 尚未代码签名，首次运行 Windows SmartScreen 可能提示
+- **设置面板（M4）**：界面里填 API Key / Base URL / 模型 → 存到 `%APPDATA%\ResearchSwarm\config.json`
+  （**接口只回传掩码，从不回传明文**）；「验证」按钮用一次极小调用确认配置真的可用
+- **演示模式开关（M4）**：设置里一键切换（离线桩 + 真实流水线），**没有 API Key 也能完整演示**
+- **运行历史（M4）**：运行结束自动归档到 `%LOCALAPPDATA%\ResearchSwarm\runs.db`（SQLite），
+  界面左侧可点开历史；**「导出 Markdown」**把报告 + 来源清单 + 用量下载成文件；服务重启后历史仍在
 
 ---
 
@@ -203,9 +208,9 @@ venv\Scripts\python.exe scripts\build_exe.py
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 107 passed, 5 skipped
+pytest -q          # 126 passed, 5 skipped
 ruff check .       # All checks passed!
-mypy               # Success: no issues found in 17 source files
+mypy               # Success: no issues found in 21 source files
 ```
 
 | 测试文件 | 覆盖内容 |
@@ -236,8 +241,10 @@ ResearchSwarm/
 ├── app/
 │   ├── __init__.py
 │   ├── cli.py                   # 命令行前端：订阅事件流渲染进度 + 保存报告 + rich 汇总
-│   ├── api.py                   # FastAPI + SSE 后端（M2）
-│   └── desktop.py               # 桌面窗口（M3）：pywebview + 单实例 + 动态端口 + 日志重定向
+│   ├── api.py                   # FastAPI + SSE 后端：运行 / 配置 / 历史 / 导出 / 演示模式
+│   ├── desktop.py               # 桌面窗口（M3）：pywebview + 单实例 + 动态端口 + 日志重定向
+│   ├── demo.py                  # 演示模式开关（离线桩，可随时还原）
+│   └── export.py                # 运行导出 Markdown（纯函数，便于测试）
 ├── web/
 │   └── index.html               # 前端骨架：Agent 时间线 / 报告 / 停止按钮（界面迭代中）
 ├── service/
@@ -252,6 +259,8 @@ ResearchSwarm/
 │   ├── llm.py                   # LLM 客户端（超时/重试）+ 线程安全 token 计量
 │   ├── jsonx.py                 # 结构化输出解析与校验（Planner/Analyst/Critic 共用）
 │   ├── orchestrator.py          # 编排：主线 + 补研回边 + 评审闭环 + 计时（产出事件流，不 print）
+│   ├── config.py                # 用户配置：config.json 优先于环境变量，只对外给密钥掩码
+│   ├── storage.py               # 运行历史归档（SQLite，重启后历史仍在）
 │   └── utils.py                 # 文件名净化与路径去重
 ├── tools.py                     # 工具集：搜索 / 正文抓取 / 笔记（失败一律抛异常）
 ├── scripts/
@@ -260,7 +269,7 @@ ResearchSwarm/
 │   ├── demo_offline.py          # 无 API Key 的离线演示
 │   ├── smoke_llm.py             # 手工冒烟：真实调一次 LLM
 │   └── smoke_search.py          # 手工冒烟：真实调一次搜索
-├── tests/                       # 112 个 pytest 用例（107 通过 + 5 待补齐）
+├── tests/                       # 131 个 pytest 用例（126 通过 + 5 待补齐）
 ├── docs/benchmark.md            # 由脚本生成的性能表格
 ├── docs/ui-plan.md              # UI 化改造方案（事件契约/取消语义/M1–M4 里程碑）
 ├── docs/api.md                  # HTTP/SSE 接口契约（M2 前端对接用）

@@ -35,14 +35,18 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app import demo as demo_mode
+from app.export import to_markdown
+from core import config as app_config
 from core.orchestrator import run_swarm
 from core.state import SwarmState
-from service.events import QueueSink, RunEvent
+from core.storage import RunStore
+from service.events import QueueSink, RunEvent, event_now
 
 
 def _resource_root() -> Path:
@@ -66,6 +70,20 @@ class RunRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
 
 
+class ConfigUpdate(BaseModel):
+    """PUT /api/config 的请求体；字段都可选，只更新传了的那些。"""
+
+    api_key: str | None = Field(default=None, max_length=400)
+    base_url: str | None = Field(default=None, max_length=400)
+    model: str | None = Field(default=None, max_length=200)
+
+
+class DemoUpdate(BaseModel):
+    """POST /api/demo 的请求体。"""
+
+    enabled: bool
+
+
 @dataclass
 class RunRecord:
     """一次运行的完整记录：事件缓冲 + 最终状态 + 取消信号。"""
@@ -76,6 +94,7 @@ class RunRecord:
     events: list[RunEvent] = field(default_factory=list)
     state: SwarmState | None = None
     error: str = ""
+    finished_at: str = ""
     cancel: threading.Event = field(default_factory=threading.Event)
     finished: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -110,6 +129,7 @@ class RunRecord:
         payload.update(
             {
                 "started_at": state.started_at,
+                "finished_at": self.finished_at,
                 "cancelled": state.cancelled,
                 "plan": list(state.plan),
                 "report": state.draft,
@@ -177,6 +197,30 @@ class RunRegistry:
 
 registry = RunRegistry()
 
+_store: RunStore | None = None
+
+
+def get_store() -> RunStore:
+    """惰性创建归档库。
+
+    测试可注入临时库：`monkeypatch.setattr(api, "_store", RunStore(tmp_path / "runs.db"))`。
+    """
+    global _store
+    if _store is None:
+        _store = RunStore()
+    return _store
+
+
+def archive_run(record: RunRecord) -> None:
+    """把结束的运行归档到 SQLite。
+
+    归档属于附加能力：失败只记一行日志，绝不反过来影响本次运行的结果。
+    """
+    try:
+        get_store().save(record.run_id, record.detail())
+    except Exception as exc:  # noqa: BLE001 - 归档失败不能影响主流程
+        print(f"[archive] 运行 {record.run_id} 归档失败：{type(exc).__name__}: {exc}")
+
 
 def _run_worker(record: RunRecord, sink: QueueSink) -> None:
     """在工作线程里跑一次编排：事件同时写入缓冲（供回放）与 sink（供推送）。"""
@@ -197,8 +241,10 @@ def _run_worker(record: RunRecord, sink: QueueSink) -> None:
             record.state = state
             record.status = "cancelled" if state.cancelled else "finished"
     finally:
+        record.finished_at = event_now()
         record.finished.set()
         sink.close()  # 结束所有 SSE 流
+        archive_run(record)
 
 
 app = FastAPI(title="ResearchSwarm API", version="0.2.0")
@@ -236,7 +282,83 @@ def create_run(request: RunRequest) -> dict[str, Any]:
 
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str) -> dict[str, Any]:
-    return registry.get(run_id).detail()
+    """优先返回内存里的实时记录；进程重启后回落到 SQLite 归档。"""
+    try:
+        return registry.get(run_id).detail()
+    except HTTPException:
+        archived = get_store().get(run_id)
+        if archived is None:
+            raise
+        return archived
+
+
+@app.get("/api/runs/{run_id}/export")
+def export_run(run_id: str) -> Response:
+    """把一次运行导出成 Markdown 文件（浏览器直接下载）。"""
+    markdown = to_markdown(get_run(run_id))
+    return Response(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="researchswarm-{run_id}.md"'},
+    )
+
+
+@app.get("/api/history")
+def history(limit: int = 20) -> dict[str, Any]:
+    """归档历史（SQLite），按结束时间倒序。"""
+    limit = max(1, min(limit, 100))
+    store = get_store()
+    return {"runs": store.list(limit), "total": store.count()}
+
+
+@app.get("/api/config")
+def read_config() -> dict[str, Any]:
+    """当前配置（**只含密钥掩码**）。"""
+    payload = app_config.describe()
+    payload["demo"] = demo_mode.is_enabled()
+    return payload
+
+
+@app.put("/api/config")
+def write_config(update: ConfigUpdate) -> dict[str, Any]:
+    """保存配置；只更新传入的字段。"""
+    values = {
+        key: value.strip()
+        for key, value in update.model_dump().items()
+        if isinstance(value, str) and value.strip()
+    }
+    if values:
+        app_config.save_config(values)
+    payload = app_config.describe()
+    payload["demo"] = demo_mode.is_enabled()
+    payload["saved"] = bool(values)
+    return payload
+
+
+@app.post("/api/config/verify")
+def verify_config() -> dict[str, Any]:
+    """用一次极小的真实调用验证配置是否可用（会消耗 1 次调用）。"""
+    from core import llm
+
+    if demo_mode.is_enabled():
+        return {"ok": True, "mode": "demo", "message": "当前是演示模式，不会调用真实模型"}
+    try:
+        reply = llm.chat("你是连通性检查器，只回复 pong。", "ping", temperature=0.0)
+    except Exception as exc:  # noqa: BLE001 - 配置/网络错误要如实回报给界面
+        return {"ok": False, "mode": "live", "error": f"{type(exc).__name__}: {exc}"}
+    return {"ok": True, "mode": "live", "reply": reply[:80], "model": app_config.get_model()}
+
+
+@app.get("/api/demo")
+def read_demo() -> dict[str, Any]:
+    return {"enabled": demo_mode.is_enabled()}
+
+
+@app.post("/api/demo")
+def write_demo(update: DemoUpdate) -> dict[str, Any]:
+    """切换演示模式（桩客户端 + 假搜索；可随时切回真实调用）。"""
+    changed = demo_mode.enable() if update.enabled else demo_mode.disable()
+    return {"enabled": demo_mode.is_enabled(), "changed": changed}
 
 
 @app.post("/api/runs/{run_id}/cancel")
@@ -283,10 +405,7 @@ if WEB_DIR.is_dir():
 
 def enable_demo_mode() -> None:
     """装上离线桩：真实流水线 + 假 LLM/搜索（不联网、不花 token）。"""
-    from scripts import demo_offline
-
-    demo_offline._install_fake_llm()
-    demo_offline._install_fake_search()
+    demo_mode.enable()
 
 
 def main() -> None:

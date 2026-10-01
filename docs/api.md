@@ -11,9 +11,16 @@
 | GET | `/api/health` | `{"ok": true, "active_run": null \| "<run_id>"}` |
 | GET | `/api/runs` | 最近运行列表（内存注册表，最多保留 50 条） |
 | POST | `/api/runs` | 请求体 `{"query": "..."}`（1–500 字）→ `201 {"run_id": "...", "status": "running"}` |
-| GET | `/api/runs/{run_id}` | 运行快照（见下） |
+| GET | `/api/runs/{run_id}` | 运行快照（内存优先；进程重启后回落 SQLite 归档，此时带 `archived: true`） |
 | GET | `/api/runs/{run_id}/events` | **SSE** 事件流；先回放缓冲，再增量推送，结束时发 `event: end` |
 | POST | `/api/runs/{run_id}/cancel` | 请求取消 → `{"ok": true, "status": "cancelling"}`；已结束则 `{"ok": false, ...}` |
+| GET | `/api/history?limit=20` | 归档历史（SQLite，按结束时间倒序；列表不含报告正文） |
+| GET | `/api/runs/{run_id}/export` | 导出 Markdown 附件（报告 + 来源清单 + 用量元信息） |
+| GET | `/api/config` | 当前配置（**只含密钥掩码**，无明文） |
+| PUT | `/api/config` | 保存配置（`api_key` / `base_url` / `model`，只更新传入的字段） |
+| POST | `/api/config/verify` | 用一次极小调用验证配置是否可用（演示模式下不调用真实模型） |
+| GET | `/api/demo` | 演示模式状态 |
+| POST | `/api/demo` | 切换演示模式：`{"enabled": true}` → `{"enabled": ..., "changed": ...}` |
 
 ### 错误码
 

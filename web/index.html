@@ -5,41 +5,54 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ResearchSwarm</title>
   <!--
-    这是 M2 的**极简可运行骨架**：功能齐全（发起/流式进度/停止/报告），
-    样式是最朴素的深色等宽风。界面与交互归你 —— 见文件里的 TODO(用户) 标记。
+    功能骨架已完整：发起/流式进度/停止/报告/来源/失败项/设置(API Key)/演示模式/历史/导出。
+    样式与交互细节归你 —— 见文件里的 TODO(用户) 标记。
 
-    数据来源：
+    接口（完整契约见 docs/api.md）：
       POST /api/runs                    {"query": "..."} -> {"run_id": "..."}
       GET  /api/runs/{id}/events        SSE，每帧 data: <RunEvent JSON>
-      GET  /api/runs/{id}               完成后取报告/用量/来源
+      GET  /api/runs/{id}               报告/来源/用量/失败项
+      GET  /api/runs/{id}/export        Markdown 下载
       POST /api/runs/{id}/cancel        停止
+      GET  /api/history                 归档历史（SQLite）
+      GET/PUT /api/config               读取/保存配置（只回传密钥掩码）
+      POST /api/config/verify           用一次极小调用验证配置
+      GET/POST /api/demo                演示模式开关
   -->
   <style>
-    /* TODO(用户): 这里是你的地盘 —— 换成 A/B/C 任一风格（终端极简 / 卡片仪表盘 / 对话式） */
-    :root { --bg:#12141a; --panel:#1a1d25; --fg:#e6e6e6; --dim:#8b93a7; --accent:#4ea1ff; --warn:#ffb454; }
+    :root { --bg:#12141a; --panel:#1a1d25; --fg:#e6e6e6; --dim:#8b93a7; --accent:#4ea1ff; --warn:#ffb454; --ok:#5fd38d; }
     * { box-sizing: border-box; }
     body { margin:0; background:var(--bg); color:var(--fg);
            font:14px/1.6 "Cascadia Code", Consolas, "Microsoft YaHei", monospace; }
-    header { display:flex; gap:8px; padding:14px 16px; background:var(--panel); align-items:center; }
+    header { display:flex; gap:8px; padding:14px 16px; background:var(--panel); align-items:center; flex-wrap:wrap; }
     header h1 { font-size:15px; margin:0 12px 0 0; font-weight:600; letter-spacing:.5px; }
-    input[type=text] { flex:1; padding:9px 12px; border-radius:6px; border:1px solid #2b3040;
+    input[type=text], input[type=password] { padding:9px 12px; border-radius:6px; border:1px solid #2b3040;
                        background:#0e1015; color:var(--fg); font:inherit; }
+    #query { flex:1; min-width:220px; }
     button { padding:9px 16px; border-radius:6px; border:0; background:var(--accent); color:#06121f;
              font:inherit; font-weight:600; cursor:pointer; }
     button.ghost { background:#262b36; color:var(--fg); }
     button:disabled { opacity:.45; cursor:not-allowed; }
-    main { display:grid; grid-template-columns: 360px 1fr; gap:14px; padding:14px 16px; height:calc(100vh - 62px); }
+    #settings { display:none; gap:10px; padding:12px 16px; background:#161922; border-bottom:1px solid #232838;
+                flex-wrap:wrap; align-items:center; }
+    #settings.open { display:flex; }
+    #settings label { color:var(--dim); font-size:13px; }
+    #configPath { color:var(--dim); font-size:12px; }
+    main { display:grid; grid-template-columns: 380px 1fr; gap:14px; padding:14px 16px; height:calc(100vh - 62px); }
     section { background:var(--panel); border-radius:8px; padding:12px 14px; overflow:auto; }
     h2 { font-size:13px; color:var(--dim); margin:0 0 10px; text-transform:uppercase; letter-spacing:1px; }
-    #timeline { list-style:none; margin:0; padding:0; }
-    #timeline li { display:flex; justify-content:space-between; gap:8px; padding:4px 0;
-                   border-bottom:1px dashed #232838; }
+    h3 { font-size:12px; color:var(--dim); margin:14px 0 6px; }
+    #timeline, #history { list-style:none; margin:0; padding:0; }
+    #timeline li { display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-bottom:1px dashed #232838; }
     #timeline li.running { color:var(--accent); }
-    #timeline li.done { color:var(--fg); }
-    .dim { color:var(--dim); }
-    .warn { color:var(--warn); }
+    #history li { padding:5px 0; border-bottom:1px dashed #232838; cursor:pointer; }
+    #history li:hover { color:var(--accent); }
+    #history .meta { display:block; color:var(--dim); font-size:12px; }
+    .dim { color:var(--dim); } .warn { color:var(--warn); } .ok { color:var(--ok); }
     pre { white-space:pre-wrap; word-break:break-word; margin:0; }
     #usage { margin-top:12px; padding-top:10px; border-top:1px solid #232838; font-size:13px; }
+    #sources { margin-top:12px; font-size:13px; }
+    #sources a { color:var(--accent); }
     #status { color:var(--dim); font-size:13px; margin-left:auto; }
   </style>
 </head>
@@ -49,47 +62,69 @@
     <input id="query" type="text" placeholder="输入研究问题，例如：AI Agent 的发展趋势" />
     <button id="run">开始调研</button>
     <button id="stop" class="ghost" disabled>停止</button>
+    <button id="settingsToggle" class="ghost">设置</button>
     <span id="status">就绪</span>
   </header>
+
+  <div id="settings">
+    <label for="apiKey">API Key</label>
+    <input id="apiKey" type="password" size="34" placeholder="粘贴后点保存（只回传掩码）" />
+    <label for="baseUrl">Base URL</label>
+    <input id="baseUrl" type="text" size="26" placeholder="可留空" />
+    <label for="model">模型</label>
+    <input id="model" type="text" size="16" placeholder="如 deepseek-chat" />
+    <button id="saveConfig">保存</button>
+    <button id="verifyConfig" class="ghost">验证</button>
+    <label><input id="demoMode" type="checkbox" /> 演示模式（离线桩，不花钱）</label>
+    <span id="configPath"></span>
+  </div>
 
   <main>
     <section>
       <h2>Agent 时间线</h2>
       <ul id="timeline"></ul>
-      <!-- TODO(用户): 可以在这里加「补研回边」「评审重写」的可视化（事件类型 round_started / rewrite_started） -->
       <div id="usage" class="dim">尚无运行</div>
+
+      <h3>历史运行</h3>
+      <!-- TODO(用户): 历史可以做成可搜索/可删除的列表；现在点一下就把那次报告读回右侧 -->
+      <ul id="history"></ul>
     </section>
 
     <section>
-      <h2>研究报告</h2>
+      <h2>研究报告
+        <button id="exportBtn" class="ghost" style="float:right;padding:4px 10px;font-size:12px" disabled>导出 Markdown</button>
+      </h2>
       <pre id="report" class="dim">报告将在这里出现。</pre>
-      <!-- TODO(用户): 来源清单（GET /api/runs/{id} → sources）、失败项高亮（failures） -->
+      <div id="failures"></div>
       <div id="sources"></div>
     </section>
   </main>
 
   <script>
-    // 状态：当前 run_id 与事件源
     let runId = null;
     let source = null;
 
     const $ = (id) => document.getElementById(id);
     const setStatus = (text) => { $("status").textContent = text; };
+    const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
     function addTimeline(agent, text, cls) {
       const li = document.createElement("li");
       li.className = cls || "";
-      li.innerHTML = `<span>${agent}</span><span class="dim">${text}</span>`;
+      li.innerHTML = `<span>${esc(agent)}</span><span class="dim">${esc(text)}</span>`;
       $("timeline").appendChild(li);
       li.scrollIntoView({ block: "nearest" });
       return li;
     }
 
-    // 把一条 RunEvent 渲染到界面上（事件结构见 docs/ui-plan.md）
     function renderEvent(ev) {
       switch (ev.type) {
         case "run_started":
           $("timeline").innerHTML = "";
+          $("report").textContent = "运行中…";
+          $("report").classList.add("dim");
+          $("sources").innerHTML = ""; $("failures").innerHTML = "";
+          $("exportBtn").disabled = true;
           addTimeline("run", `开始 · ${ev.data.query}`, "running");
           break;
         case "step_started": {
@@ -100,7 +135,11 @@
         case "step_finished": {
           const li = [...$("timeline").children].reverse()
             .find((n) => n.dataset.agent === ev.agent && n.classList.contains("running"));
-          if (li) { li.className = "done"; li.lastElementChild.textContent = `${(ev.duration_ms / 1000).toFixed(1)}s`; }
+          if (li) {
+            li.className = "done";
+            const ms = ev.duration_ms ?? 0;
+            li.lastElementChild.textContent = `${(ms / 1000).toFixed(1)}s · ${ev.data?.usage?.total_tokens ?? 0} tok`;
+          }
           break;
         }
         case "round_started":
@@ -113,21 +152,56 @@
           addTimeline("取消", `阶段：${ev.data.stage}`, "warn");
           break;
         case "run_finished":
-          addTimeline("完成", ev.data.stop_reason, "done");
+          addTimeline("完成", ev.data.stop_reason, "ok");
           break;
       }
     }
 
-    async function loadResult(id) {
-      const res = await fetch(`/api/runs/${id}`);
-      const data = await res.json();
+    function renderResult(data) {
       $("report").classList.remove("dim");
       $("report").textContent = data.report || "(没有产出报告)";
-      const u = data.usage || {};
+
+      const usage = data.usage || {};
       $("usage").textContent =
-        `状态：${data.status} · 总耗时 ${((data.duration_ms || 0) / 1000).toFixed(1)}s · ` +
-        `LLM ${u.calls || 0} 次 / ${u.total_tokens || 0} tokens`;
-      // TODO(用户): 渲染 data.sources（来源清单）与 data.failures（失败项）
+        `状态 ${data.status} · 结束原因 ${data.stop_reason || "-"} · ` +
+        `耗时 ${((data.duration_ms || 0) / 1000).toFixed(1)}s · ` +
+        `LLM ${usage.calls || 0} 次 / ${usage.total_tokens || 0} tokens · ` +
+        `补研 ${data.research_rounds ?? 0} 轮 · 重写 ${data.revision_count ?? 0} 次`;
+
+      const failures = data.failures || {};
+      const failureKeys = Object.keys(failures);
+      $("failures").innerHTML = failureKeys.length
+        ? `<h3 class="warn">调研失败项</h3><ul>` +
+          failureKeys.map((k) => `<li>${esc(k)}：${esc(failures[k])}</li>`).join("") + `</ul>`
+        : "";
+
+      const sources = data.sources || [];
+      $("sources").innerHTML = sources.length
+        ? `<h3>参考来源（${sources.length}）</h3><ol>` +
+          sources.map((s) => `<li><a href="${esc(s.url)}" target="_blank" rel="noreferrer">${esc(s.title || s.url)}</a></li>`).join("") + `</ol>`
+        : "";
+
+      $("exportBtn").disabled = false;
+      $("exportBtn").onclick = () => window.open(`/api/runs/${data.run_id}/export`, "_blank");
+    }
+
+    async function loadRun(id) {
+      const res = await fetch(`/api/runs/${id}`);
+      if (!res.ok) { setStatus(`读取失败：${res.status}`); return; }
+      runId = id;
+      renderResult(await res.json());
+    }
+
+    async function loadHistory() {
+      const res = await fetch("/api/history?limit=20");
+      if (!res.ok) return;
+      const data = await res.json();
+      $("history").innerHTML = (data.runs || []).map((r) => `
+        <li onclick="loadRun('${r.run_id}')">
+          ${esc(r.query)}
+          <span class="meta">${esc(r.status)} · ${((r.duration_ms || 0) / 1000).toFixed(1)}s ·
+          ${r.usage?.total_tokens ?? 0} tok · ${esc(r.finished_at || "")}</span>
+        </li>`).join("") || `<li class="dim">还没有历史记录</li>`;
     }
 
     function streamEvents(id) {
@@ -137,9 +211,10 @@
         source.close(); source = null;
         $("run").disabled = false; $("stop").disabled = true;
         setStatus("完成");
-        await loadResult(id);
+        await loadRun(id);
+        await loadHistory();
       });
-      source.onerror = () => { setStatus("事件流断开（服务是否已停止？）"); };
+      source.onerror = () => setStatus("事件流断开（服务是否已停止？）");
     }
 
     $("run").onclick = async () => {
@@ -170,6 +245,52 @@
       setStatus("正在停止…（当前 LLM 调用结束后生效）");
       await fetch(`/api/runs/${runId}/cancel`, { method: "POST" });
     };
+
+    // ------------------------------------------------------------------ 设置
+    $("settingsToggle").onclick = () => $("settings").classList.toggle("open");
+
+    async function loadConfig() {
+      const res = await fetch("/api/config");
+      if (!res.ok) return;
+      const cfg = await res.json();
+      $("apiKey").placeholder = cfg.has_api_key ? `已保存：${cfg.api_key_masked}` : "尚未配置";
+      $("baseUrl").value = cfg.base_url || "";
+      $("model").value = cfg.model || "";
+      $("demoMode").checked = !!cfg.demo;
+      $("configPath").textContent = `配置：${cfg.config_path}`;
+    }
+
+    $("saveConfig").onclick = async () => {
+      const body = { base_url: $("baseUrl").value.trim(), model: $("model").value.trim() };
+      const key = $("apiKey").value.trim();
+      if (key) body.api_key = key;  // 留空则不改动已保存的 Key
+      const res = await fetch("/api/config", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const cfg = await res.json();
+      $("apiKey").value = "";
+      $("apiKey").placeholder = cfg.has_api_key ? `已保存：${cfg.api_key_masked}` : "尚未配置";
+      setStatus(cfg.saved ? "配置已保存" : "没有需要保存的改动");
+    };
+
+    $("verifyConfig").onclick = async () => {
+      setStatus("验证中…");
+      const res = await fetch("/api/config/verify", { method: "POST" });
+      const data = await res.json();
+      setStatus(data.ok ? `配置可用（${data.mode}）` : `配置不可用：${data.error || ""}`);
+    };
+
+    $("demoMode").onchange = async (event) => {
+      const res = await fetch("/api/demo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: event.target.checked }),
+      });
+      const data = await res.json();
+      setStatus(data.enabled ? "已开启演示模式（不调用真实 API）" : "已切回真实调用");
+    };
+
+    loadConfig();
+    loadHistory();
   </script>
 </body>
 </html>
