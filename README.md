@@ -197,6 +197,8 @@ venv\Scripts\python.exe scripts\build_exe.py
 - **打包要点**（都写进 `scripts/build_exe.py` 了）：`--add-data web;web` 带前端、`--collect-all webview` 带 WebView2 的 .NET DLL、`--collect-data trafilatura` 带抓正文的数据文件、uvicorn 的多个动态导入用 `--hidden-import` 显式声明；排查启动异常时加 `--console` 出控制台版
 - **已知边界**：exe 尚未代码签名，首次运行 Windows SmartScreen 可能提示
 - **桌面快捷方式**：`%USERPROFILE%\Desktop\ResearchSwarm.lnk`（指向 `dist` 里的 exe；删掉 `dist` 后需重建）
+- **发给别人用**：发布目录里会自动带上 [`使用说明.txt`](使用说明.txt)（含"去哪注册 DeepSeek API、怎么填 Key、常见问题"），
+  压缩整个 `dist\ResearchSwarm` 目录一起发即可 —— **只发 exe 是跑不起来的**（onedir 结构必须有 `_internal`）
 - **设置面板（M4）**：界面里填 API Key / Base URL / 模型 → 存到 `%APPDATA%\ResearchSwarm\config.json`
   （**接口只回传掩码，从不回传明文**）；「验证」按钮用一次极小调用确认配置真的可用
 - **演示模式开关（M4）**：设置里一键切换（离线桩 + 真实流水线），**没有 API Key 也能完整演示**

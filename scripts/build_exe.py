@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,9 @@ ENTRY = ROOT / "run_desktop.py"
 ICON = ROOT / "assets" / "icon.ico"
 DIST = ROOT / "dist"
 NAME = "ResearchSwarm"
+
+# 随包一起分发的文档：接收方解压后第一眼就能看到「怎么用、去哪申请 API Key」
+BUNDLED_DOCS = [ROOT / "使用说明.txt", ROOT / "README.md"]
 
 # uvicorn / fastapi 大量使用运行时动态导入，必须显式告知 PyInstaller
 HIDDEN_IMPORTS = [
@@ -38,6 +42,19 @@ HIDDEN_IMPORTS = [
     "uvicorn.lifespan.on",
     "webview.platforms.edgechromium",
 ]
+
+
+def copy_docs(target_dir: Path) -> list[Path]:
+    """把使用说明与 README 复制到发布目录（接收方解压即可见）。"""
+    if not target_dir.is_dir():
+        return []
+    copied: list[Path] = []
+    for src in BUNDLED_DOCS:
+        if src.exists():
+            dest = target_dir / src.name
+            shutil.copy2(src, dest)
+            copied.append(dest)
+    return copied
 
 
 def build(console: bool = False, name: str = NAME) -> int:
@@ -70,6 +87,8 @@ def build(console: bool = False, name: str = NAME) -> int:
     if result.returncode == 0:
         exe = DIST / name / f"{name}.exe"
         print(f"构建完成：{exe}（存在: {exe.exists()}）")
+        for doc in copy_docs(DIST / name):
+            print(f"  随包文档：{doc.name}")
     else:
         print(f"构建失败，退出码 {result.returncode}")
     return result.returncode
