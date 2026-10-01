@@ -199,6 +199,9 @@ venv\Scripts\python.exe scripts\build_exe.py
 - **桌面快捷方式**：`%USERPROFILE%\Desktop\ResearchSwarm.lnk`（指向 `dist` 里的 exe；删掉 `dist` 后需重建）
 - **发给别人用**：发布目录里会自动带上 [`使用说明.txt`](使用说明.txt)（含"去哪注册 DeepSeek API、怎么填 Key、常见问题"），
   压缩整个 `dist\ResearchSwarm` 目录一起发即可 —— **只发 exe 是跑不起来的**（onedir 结构必须有 `_internal`）
+- **数据都在对方本机**：历史 `%LOCALAPPDATA%\ResearchSwarm\runs.db`、配置 `%APPDATA%\ResearchSwarm\config.json`、
+  日志 `%LOCALAPPDATA%\ResearchSwarm\logs\` —— **发布包里不含任何运行记录或密钥**（已实测：包内无 db/配置/日志，且搜不到任何 Key）；
+  换一台电脑安装后历史是空的，程序只监听 `127.0.0.1`，同一局域网内其他机器也访问不到
 - **设置面板（M4）**：界面里填 API Key / Base URL / 模型 → 存到 `%APPDATA%\ResearchSwarm\config.json`
   （**接口只回传掩码，从不回传明文**）；「验证」按钮用一次极小调用确认配置真的可用
 - **演示模式开关（M4）**：设置里一键切换（离线桩 + 真实流水线），**没有 API Key 也能完整演示**
