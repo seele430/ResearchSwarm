@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Tests](https://img.shields.io/badge/tests-126%20passed-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-133%20passed-brightgreen.svg)
 ![Quality](https://img.shields.io/badge/ruff%20%2B%20mypy-clean-blueviolet.svg)
 
 ---
@@ -34,7 +34,7 @@
 - **结构化输出加固**：`core/jsonx.py` 采用「多候选提取 + 括号配对扫描 + 字段校验」，`"approved": "true"`、`"score": "9"`、内容里含 ``` 都能正确解析。
   *验证：`tests/test_json_parsing.py`（27 个用例）。*
 - **可观测**：`history` 带时间戳与每步耗时，token 用量自动计量，运行结束用 rich 打汇总表。
-- **工程质量**：131 个 pytest 用例（126 通过 + 5 个事件契约用例待补齐）、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
+- **工程质量**：**133 个 pytest 用例全部通过**、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
 
 ---
 
@@ -196,6 +196,7 @@ venv\Scripts\python.exe scripts\build_exe.py
 - **无控制台也能排查**：标准流被接到 `%LOCALAPPDATA%\ResearchSwarm\logs\desktop.log`
 - **打包要点**（都写进 `scripts/build_exe.py` 了）：`--add-data web;web` 带前端、`--collect-all webview` 带 WebView2 的 .NET DLL、`--collect-data trafilatura` 带抓正文的数据文件、uvicorn 的多个动态导入用 `--hidden-import` 显式声明；排查启动异常时加 `--console` 出控制台版
 - **已知边界**：exe 尚未代码签名，首次运行 Windows SmartScreen 可能提示
+- **桌面快捷方式**：`%USERPROFILE%\Desktop\ResearchSwarm.lnk`（指向 `dist` 里的 exe；删掉 `dist` 后需重建）
 - **设置面板（M4）**：界面里填 API Key / Base URL / 模型 → 存到 `%APPDATA%\ResearchSwarm\config.json`
   （**接口只回传掩码，从不回传明文**）；「验证」按钮用一次极小调用确认配置真的可用
 - **演示模式开关（M4）**：设置里一键切换（离线桩 + 真实流水线），**没有 API Key 也能完整演示**
@@ -208,7 +209,7 @@ venv\Scripts\python.exe scripts\build_exe.py
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 126 passed, 5 skipped
+pytest -q          # 133 passed
 ruff check .       # All checks passed!
 mypy               # Success: no issues found in 21 source files
 ```
@@ -224,8 +225,11 @@ mypy               # Success: no issues found in 21 source files
 | `test_observability.py` | 时间戳/耗时、token 计量（含并发累加）、汇总表 |
 | `test_replan.py` | 补研回边：触发条件、轮次上限、失败重试与撤销 |
 | `test_pipeline_offline.py` | 离线端到端：五角色齐全、报告带真实来源 |
-| `test_events.py` | 运行事件契约（范例已完成，5 个用例待补齐 —— 见 docstring 规格） |
+| `test_events.py` | 事件契约：step 配对与顺序、取消（Writer 前 / 一开始）、QueueSink 跨线程、to_sink 入参、事件不可变 |
 | `test_api.py` | HTTP/SSE 后端：静态前端与 API 共存、事件流完整、取消在步骤边界生效、并发 409、404/422 |
+| `test_config.py` | 配置优先级（文件 > 环境变量）、合并写入、密钥掩码、不泄漏明文 |
+| `test_storage.py` | SQLite 归档往返、幂等更新、轻量列表、Markdown 导出 |
+| `test_desktop.py` | 端口选择、单实例互斥、运行信息落盘、无标准流时的日志重定向回归 |
 
 CI 见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)（Python 3.10 / 3.12 矩阵）。
 
@@ -269,7 +273,7 @@ ResearchSwarm/
 │   ├── demo_offline.py          # 无 API Key 的离线演示
 │   ├── smoke_llm.py             # 手工冒烟：真实调一次 LLM
 │   └── smoke_search.py          # 手工冒烟：真实调一次搜索
-├── tests/                       # 131 个 pytest 用例（126 通过 + 5 待补齐）
+├── tests/                       # 133 个 pytest 用例（全部通过）
 ├── docs/benchmark.md            # 由脚本生成的性能表格
 ├── docs/ui-plan.md              # UI 化改造方案（事件契约/取消语义/M1–M4 里程碑）
 ├── docs/api.md                  # HTTP/SSE 接口契约（M2 前端对接用）

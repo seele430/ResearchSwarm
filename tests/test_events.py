@@ -1,26 +1,28 @@
 """运行事件契约与取消机制的测试（M1 的验收标准）。
 
-已完成的范例在下面，**5 个 TODO 由你实现**（都用 `pytest.mark.skip` 标着，
-所以在你动手前测试基线保持全绿，不会挡住 CI）。
+覆盖：
+- 事件信封（run_started / run_finished）与可 JSON 序列化
+- step_started / step_finished 严格配对与首次执行顺序
+- 取消在**步骤边界**生效：不执行后续 Agent、已完成产出保留
+- 一开始就取消：只有 run_started + run_cancelled，且没有产生任何步骤
+- QueueSink 跨线程投递（M2 SSR/SSE 的基础）
+- to_sink 的入参兼容性
 
-规格细节见 `docs/ui-plan.md` 的「事件契约」与「取消语义」两节。要点：
-- 事件序列：run_started → step_started/step_finished ×N →（可选 round_* / rewrite_started）→ run_finished
-- 取消在**步骤边界**生效：置位后不再执行后续 Agent，已完成产出保留，并发出 run_cancelled
-- run_finished 的 `data.stop_reason` 区分 `approved` / `max_revisions` / `finished`
-
-跑测试：`pytest tests/test_events.py -q`（`-k TODO` 之外的全都会跑）
+规格见 `docs/ui-plan.md` 的「事件契约」与「取消语义」两节。
 """
 
 from __future__ import annotations
 
 import threading
+from dataclasses import FrozenInstanceError
+from typing import Any
 
 import pytest
 
 from agents import real_agents
 from core import orchestrator
 from core.state import SwarmState
-from service.events import RunEvent, null_sink
+from service.events import QueueSink, RunEvent, null_sink, to_sink
 from tools import SearchResult
 
 
@@ -67,7 +69,11 @@ def _collect_events(
     return state, events
 
 
-# --------------------------------------------------------------------- 范例
+def _agents_of(events: list[RunEvent], kind: str) -> list[str]:
+    return [str(e.agent) for e in events if e.type == kind]
+
+
+# --------------------------------------------------------------------- 基本契约
 def test_emits_run_started_then_run_finished(monkeypatch):
     """最小完整断言：首尾事件、stop_reason、耗时、未被取消。"""
     state, events = _collect_events(monkeypatch)
@@ -84,60 +90,119 @@ def test_emits_run_started_then_run_finished(monkeypatch):
     assert payload["type"] == "run_finished" and isinstance(payload["data"], dict)
 
 
-# ----------------------------------------------------------------- 你的任务
-@pytest.mark.skip(reason="TODO(用户): 事件配对与顺序")
 def test_steps_are_paired_and_ordered(monkeypatch):
-    """断言：
+    """每个 step_started 都有同 agent 的 step_finished，且首次执行顺序正确。"""
+    _, events = _collect_events(monkeypatch)
 
-    1. 每个 `step_started` 都紧跟着同 agent 的 `step_finished`（数量相等、名字一一对应）；
-    2. **首次执行**的 agent 顺序是 Planner → Researcher → Analyst → Writer → Critic；
-    3. 每条 `step_finished.duration_ms >= 0`；
-    4. 每条 `step_finished.data["usage"]["calls"]` 是整数（用量快照可用）。
-    """
+    started = _agents_of(events, "step_started")
+    finished = _agents_of(events, "step_finished")
+    assert started == finished, "step_started / step_finished 必须一一对应且顺序一致"
+    assert started[:5] == ["Planner", "Researcher", "Analyst", "Writer", "Critic"]
+
+    for event in events:
+        if event.type == "step_finished":
+            assert event.duration_ms is not None and event.duration_ms >= 0
+            assert isinstance(event.data["usage"]["calls"], int)
 
 
-@pytest.mark.skip(reason="TODO(用户): 取消在 Analyst 之后生效")
+# ------------------------------------------------------------------------- 取消
 def test_cancel_stops_before_writer(monkeypatch):
-    """用一个 sink：收到 Analyst 的 `step_finished` 时 `cancel.set()`。断言：
+    """Analyst 结束时取消：不进入 Writer，已完成的产出保留。"""
+    _install_offline_stubs(monkeypatch)
+    cancel = threading.Event()
+    events: list[RunEvent] = []
 
-    1. `state.cancelled is True`；
-    2. 事件流最后一条是 `run_cancelled`；
-    3. 没有任何 `agent == "Writer"` 的事件；
-    4. 取消前已完成的产出仍在（例如 `state.plan` 非空、`state.analysis` 非空）。
-    """
+    def sink(event: RunEvent) -> None:
+        events.append(event)
+        if event.type == "step_finished" and event.agent == "Analyst":
+            cancel.set()
+
+    state = orchestrator.run_swarm("取消测试", on_event=sink, cancel=cancel)
+
+    assert state.cancelled is True
+    assert events[-1].type == "run_cancelled"
+    assert events[-1].data["stage"] == "before_writer"
+    assert "Writer" not in _agents_of(events, "step_started")
+    # 取消前完成的产出仍然在
+    assert state.plan and state.analysis
 
 
-@pytest.mark.skip(reason="TODO(用户): 一开始就取消")
 def test_cancel_before_planner_produces_no_steps(monkeypatch):
-    """构造一个**已置位**的 `threading.Event()` 传进去，断言：
+    """一开始就取消：只有 run_started + run_cancelled，一步都没跑。"""
+    _install_offline_stubs(monkeypatch)
+    cancel = threading.Event()
+    cancel.set()
+    events: list[RunEvent] = []
 
-    1. `state.cancelled is True`；
-    2. 事件序列恰为 `["run_started", "run_cancelled"]`；
-    3. `state.history == []`（一步都没跑）。
-    """
+    state = orchestrator.run_swarm("预先取消", on_event=events.append, cancel=cancel)
+
+    assert [event.type for event in events] == ["run_started", "run_cancelled"]
+    assert events[-1].data["stage"] == "before_planner"
+    assert state.cancelled is True
+    assert state.history == []
+    assert state.draft == ""
 
 
-@pytest.mark.skip(reason="TODO(用户): QueueSink 跨线程投递（M2 SSE 的基础）")
+# ------------------------------------------------------------------- sink 行为
 def test_queue_sink_delivers_events_across_threads(monkeypatch):
-    """在**子线程**里跑 `run_swarm`，主线程用 `QueueSink.iter_events()` 收集。断言：
+    """子线程跑编排、主线程 iter_events() 收集；序列要与直接收集的一致。"""
+    _install_offline_stubs(monkeypatch)
+    sink = QueueSink()
 
-    1. 收到的事件与直接 `list.append` 时**数量和类型序列一致**；
-    2. 第一条是 `run_started`；
-    3. 收完记得 `sink.close()` —— 否则 `iter_events()` 会永远阻塞（用 `thread.join(timeout=…)` 兜底）。
+    def worker() -> None:
+        orchestrator.run_swarm("跨线程测试", on_event=sink)
+        sink.close()  # 不 close 的话 iter_events() 会一直等
 
-    提示：`from service.events import QueueSink`
-    """
+    thread = threading.Thread(target=worker, name="swarm-worker")
+    thread.start()
+    collected = list(sink.iter_events())  # 阻塞直到收到哨兵
+    thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    assert collected[0].type == "run_started"
+    assert collected[-1].type == "run_finished"
+
+    _, direct = _collect_events(monkeypatch)
+    assert [e.type for e in collected] == [e.type for e in direct]
 
 
-@pytest.mark.skip(reason="TODO(用户): to_sink 的入参兼容性")
 def test_to_sink_accepts_none_callable_and_sink():
-    """断言：`to_sink(None)` 返回可调用对象且调用不抛异常；
-    `to_sink(lambda e: None)` 返回该可调用对象；`to_sink(123)` 抛 `TypeError`。
+    """None / 普通函数 / sink 对象都能用；其它类型要明确报错。"""
+    event = RunEvent(type="run_started", at="2026-01-01T00:00:00+08:00")
 
-    提示：`from service.events import to_sink`
-    """
+    to_sink(None)(event)  # 不抛异常即可
+
+    received: list[RunEvent] = []
+    to_sink(received.append)(event)
+    assert received == [event]
+
+    queue_sink = QueueSink()
+    to_sink(queue_sink)(event)
+    assert queue_sink.get(timeout=1) == event
+    queue_sink.close()
+    assert queue_sink.get(timeout=1) is None  # 哨兵：流已结束
+
+    with pytest.raises(TypeError):
+        to_sink(123)  # type: ignore[arg-type]
 
 
 def test_null_sink_is_callable():
-    """参考实现：null_sink 就是「丢掉事件」，不应该抛异常。"""
+    """null_sink 就是「丢掉事件」，不应该抛异常。"""
     null_sink(RunEvent(type="run_started", at="2026-01-01T00:00:00+08:00"))
+
+
+def test_event_dataclass_is_frozen():
+    """事件是跨线程传递的不可变快照。"""
+    event = RunEvent(type="run_started", at="2026-01-01T00:00:00+08:00", data={"a": 1})
+    with pytest.raises(FrozenInstanceError):
+        event.type = "run_finished"  # type: ignore[misc]
+
+
+def test_usage_snapshot_is_json_serializable(monkeypatch):
+    """step_finished 里带出的用量快照必须是纯数据（能直接进 JSON/SSE）。"""
+    _, events = _collect_events(monkeypatch)
+    finished = [e for e in events if e.type == "step_finished"]
+    assert finished
+    usage: Any = finished[-1].data["usage"]
+    assert set(usage) >= {"prompt_tokens", "completion_tokens", "total_tokens", "calls"}
+    assert all(isinstance(v, int) for v in usage.values())
