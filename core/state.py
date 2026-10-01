@@ -90,6 +90,9 @@ class SwarmState:
     duration_ms: int = 0
     usage: UsageStat = field(default_factory=UsageStat)
 
+    # 是否被取消：编排器在步骤边界收到取消信号时置位（已完成的步骤与产出保留）
+    cancelled: bool = False
+
     # 执行日志（谁在什么时候做了什么，步骤级条目带耗时）
     history: list[HistoryEntry] = field(default_factory=list)
 

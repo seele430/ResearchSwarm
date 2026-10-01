@@ -170,7 +170,7 @@ python -m scripts.bench_research --live --tasks 5
 pip install -r requirements-dev.txt
 pytest -q          # 92 passed
 ruff check .       # All checks passed!
-mypy               # Success: no issues found in 10 source files
+mypy               # Success: no issues found in 14 source files
 ```
 
 | 测试文件 | 覆盖内容 |
@@ -193,7 +193,13 @@ CI 见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)（Python 3.10 / 3.
 
 ```
 ResearchSwarm/
-├── main.py                      # 入口：提问、跑流水线、保存报告、打印日志与汇总
+├── main.py                      # 入口薄壳：调用 app/cli，并向后兼容再导出 CLI 辅助函数
+├── app/
+│   ├── __init__.py
+│   └── cli.py                   # 命令行前端：订阅事件流渲染进度 + 保存报告 + rich 汇总
+├── service/
+│   ├── __init__.py
+│   └── events.py                # 运行事件契约（结构化、零依赖、跨线程安全）
 ├── agents/
 │   ├── __init__.py
 │   └── real_agents.py           # 5 个角色的真实实现（prompt + 工具 + 降级策略）
@@ -202,7 +208,7 @@ ResearchSwarm/
 │   ├── state.py                 # SwarmState：共享状态 + 观测数据（history/usage/sources）
 │   ├── llm.py                   # LLM 客户端（超时/重试）+ 线程安全 token 计量
 │   ├── jsonx.py                 # 结构化输出解析与校验（Planner/Analyst/Critic 共用）
-│   ├── orchestrator.py          # 编排：主线 + 补研回边 + 评审闭环 + 计时
+│   ├── orchestrator.py          # 编排：主线 + 补研回边 + 评审闭环 + 计时（产出事件流，不 print）
 │   └── utils.py                 # 文件名净化与路径去重
 ├── tools.py                     # 工具集：搜索 / 正文抓取 / 笔记（失败一律抛异常）
 ├── scripts/
@@ -212,6 +218,7 @@ ResearchSwarm/
 │   └── smoke_search.py          # 手工冒烟：真实调一次搜索
 ├── tests/                       # 92 个 pytest 用例
 ├── docs/benchmark.md            # 由脚本生成的性能表格
+├── docs/ui-plan.md              # UI 化改造方案（事件契约/取消语义/M1–M4 里程碑）
 ├── examples/sample-report.md    # 示例报告
 ├── notes/                       # 运行产物（gitignore）
 ├── pyproject.toml               # ruff / mypy 配置
