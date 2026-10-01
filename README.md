@@ -186,14 +186,20 @@ python -m app.api --demo     # 离线演示：假 LLM + 假搜索，真实流水
 venv\Scripts\python.exe -m app.desktop --demo
 
 # 打包出可双击运行的 exe
-venv\Scripts\python.exe scripts\build_exe.py
-# 产物：dist\ResearchSwarm\ResearchSwarm.exe（约 15 MB，整目录约 96 MB）
+venv\Scripts\python.exe scripts\build_exe.py              # 目录版 → dist\ResearchSwarm\ResearchSwarm.exe
+venv\Scripts\python.exe scripts\build_exe.py --onefile    # 单文件版 → dist\single\ResearchSwarm.exe
+venv\Scripts\python.exe scripts\build_exe.py --console    # 控制台调试版（排查启动异常）
+# 目录版：exe 约 15 MB，整目录约 96 MB（约 2600 个文件，必须整目录分发）
+# 单文件版：约 48 MB 的单个 exe
 ```
 
 - **窗口**：pywebview 复用系统自带的 **WebView2**（Win11 已预装），不打包浏览器内核、不用 Electron/Node
 - **单实例**：独占锁端口 8755；重复双击会直接退出，不会开出一堆窗口
 - **动态端口**：默认 8756，被占用时自动换；实际端口写入 `%LOCALAPPDATA%\ResearchSwarm\last-run.json`
 - **无控制台也能排查**：标准流被接到 `%LOCALAPPDATA%\ResearchSwarm\logs\desktop.log`
+- **两种形态怎么选**（实测数据）：**目录版** `dist\ResearchSwarm\`（exe 15 MB + `_internal`，**冷启动约 3.6 秒**），自己日常用；
+  **单文件版** `dist\single\ResearchSwarm.exe`（**48.2 MB 一个文件**，发给别人最省事，**冷启动约 9–10 秒** —— 每次启动都要自解压到 `%TEMP%\_MEIxxxx`，正常退出时自动清理）。
+  单文件版已实测：窗口正常、完整流水线、历史归档、Markdown 导出、单条删除与清空全部全部可用；关窗口后父/子进程都会退出并清理临时目录
 - **打包要点**（都写进 `scripts/build_exe.py` 了）：`--add-data web;web` 带前端、`--collect-all webview` 带 WebView2 的 .NET DLL、`--collect-data trafilatura` 带抓正文的数据文件、uvicorn 的多个动态导入用 `--hidden-import` 显式声明；排查启动异常时加 `--console` 出控制台版
 - **已知边界**：exe 尚未代码签名，首次运行 Windows SmartScreen 可能提示
 - **桌面快捷方式**：`%USERPROFILE%\Desktop\ResearchSwarm.lnk`（指向 `dist` 里的 exe；删掉 `dist` 后需重建）

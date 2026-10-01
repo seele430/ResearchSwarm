@@ -25,13 +25,16 @@
    "Microsoft Edge WebView2 Runtime"）
 3) 一个属于你自己的大模型 API Key（获取方式见【3】）
    —— 也可以先用【6】演示模式，不需要 Key
-4) ⚠️ 重要：不能只复制那一个 exe 文件！
+4) ⚠️ 重要：程序有两种发布形态，先看你拿到的是哪一种
 
-   本程序以「文件夹」形式发布：ResearchSwarm.exe 必须和同目录下的 _internal
-   文件夹放在一起才能运行。
+   【目录版】一个文件夹，里面有 ResearchSwarm.exe 和 _internal 文件夹
+       ⚠️ 不能只复制那一个 exe —— 必须整个文件夹一起用！
+       ✅ 正确用法：解压整个压缩包 → 双击里面的 ResearchSwarm.exe
+       ❌ 错误用法：只把 ResearchSwarm.exe 拷出来单独运行 → 会报错起不来
 
-   ✅ 正确用法：解压整个压缩包 → 双击里面的 ResearchSwarm.exe
-   ❌ 错误用法：只把 ResearchSwarm.exe 拷出来单独发/单独运行 → 会报错起不来
+   【单文件版】只有一个 ResearchSwarm.exe（约 48 MB）
+       ✅ 双击即可，不需要任何其它文件
+       ⏳ 每次启动会先自解压，比目录版慢几秒（约 10 秒才出窗口），属正常现象
 
 
 【2】启动
