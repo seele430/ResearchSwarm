@@ -7,3 +7,6 @@ ruff>=0.6.0
 mypy>=1.10
 # FastAPI 的 TestClient 依赖 httpx（仅测试用，故只声明在开发依赖里）
 httpx>=0.27.0
+# 打包工具（M3）：scripts/build_exe.py 使用
+pyinstaller>=6.0
+pillow>=10.0

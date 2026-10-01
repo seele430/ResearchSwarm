@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import threading
 import time
 import uuid
@@ -43,7 +44,18 @@ from core.orchestrator import run_swarm
 from core.state import SwarmState
 from service.events import QueueSink, RunEvent
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+def _resource_root() -> Path:
+    """静态资源根目录。
+
+    开发时是仓库根目录；被 PyInstaller 冻结后资源在 `sys._MEIPASS`（--add-data 展开处）。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    return Path(__file__).resolve().parent.parent
+
+
+WEB_DIR = _resource_root() / "web"
 DEFAULT_PORT = 8756
 MAX_KEPT_RUNS = 50
 

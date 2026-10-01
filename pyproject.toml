@@ -22,7 +22,9 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.10"
-files = ["core", "agents", "service", "app", "tools.py", "main.py"]
+files = ["core", "agents", "service", "app", "tools.py", "main.py", "run_desktop.py"]
+# mypy . 会遍历整个仓库，必须显式跳过虚拟环境与打包产物
+exclude = ["^venv/", "^build/", "^dist/", "^notes/", "^examples/"]
 ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = true

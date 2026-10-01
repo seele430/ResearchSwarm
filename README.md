@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Tests](https://img.shields.io/badge/tests-100%20passed-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-107%20passed-brightgreen.svg)
 ![Quality](https://img.shields.io/badge/ruff%20%2B%20mypy-clean-blueviolet.svg)
 
 ---
@@ -34,7 +34,7 @@
 - **结构化输出加固**：`core/jsonx.py` 采用「多候选提取 + 括号配对扫描 + 字段校验」，`"approved": "true"`、`"score": "9"`、内容里含 ``` 都能正确解析。
   *验证：`tests/test_json_parsing.py`（27 个用例）。*
 - **可观测**：`history` 带时间戳与每步耗时，token 用量自动计量，运行结束用 rich 打汇总表。
-- **工程质量**：105 个 pytest 用例（100 通过 + 5 个事件契约用例待补齐）、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
+- **工程质量**：112 个 pytest 用例（107 通过 + 5 个事件契约用例待补齐）、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
 
 ---
 
@@ -179,13 +179,33 @@ python -m app.api --demo     # 离线演示：假 LLM + 假搜索，真实流水
 
 ---
 
+## 🖥️ 桌面版（M3）
+
+```bash
+# 开发时直接开窗
+venv\Scripts\python.exe -m app.desktop --demo
+
+# 打包出可双击运行的 exe
+venv\Scripts\python.exe scripts\build_exe.py
+# 产物：dist\ResearchSwarm\ResearchSwarm.exe（约 15 MB，整目录约 96 MB）
+```
+
+- **窗口**：pywebview 复用系统自带的 **WebView2**（Win11 已预装），不打包浏览器内核、不用 Electron/Node
+- **单实例**：独占锁端口 8755；重复双击会直接退出，不会开出一堆窗口
+- **动态端口**：默认 8756，被占用时自动换；实际端口写入 `%LOCALAPPDATA%\ResearchSwarm\last-run.json`
+- **无控制台也能排查**：标准流被接到 `%LOCALAPPDATA%\ResearchSwarm\logs\desktop.log`
+- **打包要点**（都写进 `scripts/build_exe.py` 了）：`--add-data web;web` 带前端、`--collect-all webview` 带 WebView2 的 .NET DLL、`--collect-data trafilatura` 带抓正文的数据文件、uvicorn 的多个动态导入用 `--hidden-import` 显式声明；排查启动异常时加 `--console` 出控制台版
+- **已知边界**：exe 尚未签名，首次运行 Windows SmartScreen 可能提示；配置界面（填 API Key）在 M4
+
+---
+
 ## 🧪 测试与质量
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 100 passed, 5 skipped
+pytest -q          # 107 passed, 5 skipped
 ruff check .       # All checks passed!
-mypy               # Success: no issues found in 15 source files
+mypy               # Success: no issues found in 17 source files
 ```
 
 | 测试文件 | 覆盖内容 |
@@ -211,10 +231,13 @@ CI 见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)（Python 3.10 / 3.
 ```
 ResearchSwarm/
 ├── main.py                      # 入口薄壳：调用 app/cli，并向后兼容再导出 CLI 辅助函数
+├── run_desktop.py               # 桌面版入口（PyInstaller 的入口脚本；开发时也可直接跑）
+├── assets/icon.ico              # 应用图标（打包进 exe）
 ├── app/
 │   ├── __init__.py
 │   ├── cli.py                   # 命令行前端：订阅事件流渲染进度 + 保存报告 + rich 汇总
-│   └── api.py                   # FastAPI + SSE 后端（M2）；M3 会加 desktop.py（pywebview 开窗）
+│   ├── api.py                   # FastAPI + SSE 后端（M2）
+│   └── desktop.py               # 桌面窗口（M3）：pywebview + 单实例 + 动态端口 + 日志重定向
 ├── web/
 │   └── index.html               # 前端骨架：Agent 时间线 / 报告 / 停止按钮（界面迭代中）
 ├── service/
@@ -233,10 +256,11 @@ ResearchSwarm/
 ├── tools.py                     # 工具集：搜索 / 正文抓取 / 笔记（失败一律抛异常）
 ├── scripts/
 │   ├── bench_research.py        # 并联 vs 串联的可复现测量
+│   ├── build_exe.py             # M3：PyInstaller 打包（onedir + 图标 + 静态资源 + hidden imports）
 │   ├── demo_offline.py          # 无 API Key 的离线演示
 │   ├── smoke_llm.py             # 手工冒烟：真实调一次 LLM
 │   └── smoke_search.py          # 手工冒烟：真实调一次搜索
-├── tests/                       # 105 个 pytest 用例（100 通过 + 5 待补齐）
+├── tests/                       # 112 个 pytest 用例（107 通过 + 5 待补齐）
 ├── docs/benchmark.md            # 由脚本生成的性能表格
 ├── docs/ui-plan.md              # UI 化改造方案（事件契约/取消语义/M1–M4 里程碑）
 ├── docs/api.md                  # HTTP/SSE 接口契约（M2 前端对接用）

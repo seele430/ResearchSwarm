@@ -51,10 +51,10 @@ agents/ tools.py 真实 Agent 与工具层
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **M1**（已完成） | 事件契约 + 编排器去 print + 取消 + CLI 前端迁移 | 92 个测试保持全绿；出现取消事件且未执行后续步骤；CLI 输出与改造前一致 |
-| **M2** | `app/api.py`（FastAPI）+ SSE + `web/index.html` | `python -m app.api` 后浏览器可用：时间线实时刷新、报告可读、停止按钮生效 |
-| **M3** | `app/desktop.py`（pywebview）+ PyInstaller + 图标 + 单实例 | 双击 exe 出窗口；无 Python 环境也能跑；重复双击不产生第二个实例 |
-| **M4** | SQLite 运行历史、导出 Markdown、token 成本统计、**离线演示模式** | 历史可查；无 API Key 也能完整演示一次运行（复用 `scripts/demo_offline.py`） |
+| **M1**（✅ 2026-10-01） | 事件契约 + 编排器去 print + 取消 + CLI 前端迁移 | 测试全绿；取消事件生效且不执行后续步骤；CLI 输出与改造前一致 |
+| **M2**（✅ 后端完成 / 🔸 前端待迭代） | `app/api.py`（FastAPI）+ SSE + `web/index.html` | 后端实测通过：静态前端与 API 共存、事件流完整、取消在步骤边界生效、并发 409；前端样式由用户继续打磨 |
+| **M3**（✅ 2026-10-01） | `app/desktop.py`（pywebview）+ PyInstaller + 图标 + 单实例 | 实测：双击 exe 出窗口、内部服务正常、**在 exe 里跑通完整流水线**（含补研回边）、重复双击被拦截、日志落 `%LOCALAPPDATA%` |
+| **M4** | SQLite 运行历史、导出 Markdown、token 成本统计、**配置界面（填 API Key）** | 历史可查；无 API Key 也能完整演示一次运行（`--demo` 已提前实现，配置界面待做） |
 
 ## 分工
 

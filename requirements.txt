@@ -11,3 +11,6 @@ rich>=13.0.0
 fastapi>=0.115.0
 uvicorn>=0.30.0
 pydantic>=2.0.0
+
+# 桌面窗口（M3：Windows 上复用系统自带的 WebView2，不打包浏览器内核）
+pywebview>=5.0

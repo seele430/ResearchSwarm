@@ -6,3 +6,8 @@ notes/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# PyInstaller 构建产物（M3 打包）
+build/
+dist/
+*.spec

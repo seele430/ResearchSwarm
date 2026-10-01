@@ -64,12 +64,11 @@ class UsageMeter:
 # 进程级计量器：一次 run_swarm 前 reset、结束后 snapshot
 USAGE = UsageMeter()
 
-_client = OpenAI(
-    api_key=os.getenv("LLM_API_KEY"),
-    base_url=os.getenv("LLM_BASE_URL"),
-    timeout=DEFAULT_TIMEOUT,
-    max_retries=DEFAULT_MAX_RETRIES,
-)
+# 客户端**懒加载**：绝不在 import 阶段校验密钥。
+# 原因：桌面版（打包后的 exe）没有仓库里的 .env，如果在这里就构造 OpenAI(api_key=None)
+# 会直接抛异常，导致整个应用打不开 —— 而正确行为是「能启动，跑的时候再报可操作的错」。
+# 测试与离线演示会直接给 _client 赋值一个假客户端，懒加载逻辑要优先认它。
+_client: OpenAI | None = None
 _MODEL = (os.getenv("LLM_MODEL") or "").strip()
 
 
@@ -78,6 +77,26 @@ def _model_name() -> str:
     if not _MODEL:
         raise RuntimeError("缺少 LLM_MODEL 配置：请在 .env 中设置（示例见 .env.example）")
     return _MODEL
+
+
+def _get_client() -> OpenAI:
+    """取（必要时创建）LLM 客户端；密钥缺失时给出能照着做的报错。"""
+    global _client
+    if _client is not None:
+        return _client
+    api_key = os.getenv("LLM_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "缺少 LLM_API_KEY 配置：请在 .env 或环境变量中设置你的 API Key。"
+            "（想先体验完整流程可以不配密钥，用离线演示模式：python -m app.desktop --demo）"
+        )
+    _client = OpenAI(
+        api_key=api_key,
+        base_url=os.getenv("LLM_BASE_URL"),
+        timeout=DEFAULT_TIMEOUT,
+        max_retries=DEFAULT_MAX_RETRIES,
+    )
+    return _client
 
 
 def _record_usage(response: Any) -> None:
@@ -94,7 +113,7 @@ def _record_usage(response: Any) -> None:
 
 def chat(system_prompt: str, user_prompt: str, temperature: float = 0.7) -> str:
     """单轮对话，返回文本；token 用量自动计入 `USAGE`。"""
-    resp = _client.chat.completions.create(
+    resp = _get_client().chat.completions.create(
         model=_model_name(),
         messages=[
             {"role": "system", "content": system_prompt},

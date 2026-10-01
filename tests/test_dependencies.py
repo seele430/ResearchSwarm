@@ -22,10 +22,26 @@ ALIASES = {
     "PIL": "pillow",
     "yaml": "pyyaml",
     "sklearn": "scikit-learn",
+    "webview": "pywebview",  # 桌面窗口（M3）：包名 pywebview，导入名 webview
 }
 
-# tests/ 自身不算「项目代码」，其它目录按需排除
-SKIP_DIRS = {"venv", ".venv", "__pycache__", ".git", "tests", "notes", "examples"}
+# tests/ 自身不算「项目代码」，其它目录按需排除。
+# build/ 与 dist/ 是 PyInstaller 产物：--collect-all 会把第三方包的源码副本放进去，
+# 若不排除会被当成项目代码，误报一堆"未声明的依赖"。
+SKIP_DIRS = {
+    "venv",
+    ".venv",
+    "__pycache__",
+    ".git",
+    "tests",
+    "notes",
+    "examples",
+    "build",
+    "dist",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+}
 
 
 def _declared_distributions() -> set[str]:
