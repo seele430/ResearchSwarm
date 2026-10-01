@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ResearchSwarm</title>
+  <!--
+    这是 M2 的**极简可运行骨架**：功能齐全（发起/流式进度/停止/报告），
+    样式是最朴素的深色等宽风。界面与交互归你 —— 见文件里的 TODO(用户) 标记。
+
+    数据来源：
+      POST /api/runs                    {"query": "..."} -> {"run_id": "..."}
+      GET  /api/runs/{id}/events        SSE，每帧 data: <RunEvent JSON>
+      GET  /api/runs/{id}               完成后取报告/用量/来源
+      POST /api/runs/{id}/cancel        停止
+  -->
+  <style>
+    /* TODO(用户): 这里是你的地盘 —— 换成 A/B/C 任一风格（终端极简 / 卡片仪表盘 / 对话式） */
+    :root { --bg:#12141a; --panel:#1a1d25; --fg:#e6e6e6; --dim:#8b93a7; --accent:#4ea1ff; --warn:#ffb454; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg);
+           font:14px/1.6 "Cascadia Code", Consolas, "Microsoft YaHei", monospace; }
+    header { display:flex; gap:8px; padding:14px 16px; background:var(--panel); align-items:center; }
+    header h1 { font-size:15px; margin:0 12px 0 0; font-weight:600; letter-spacing:.5px; }
+    input[type=text] { flex:1; padding:9px 12px; border-radius:6px; border:1px solid #2b3040;
+                       background:#0e1015; color:var(--fg); font:inherit; }
+    button { padding:9px 16px; border-radius:6px; border:0; background:var(--accent); color:#06121f;
+             font:inherit; font-weight:600; cursor:pointer; }
+    button.ghost { background:#262b36; color:var(--fg); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    main { display:grid; grid-template-columns: 360px 1fr; gap:14px; padding:14px 16px; height:calc(100vh - 62px); }
+    section { background:var(--panel); border-radius:8px; padding:12px 14px; overflow:auto; }
+    h2 { font-size:13px; color:var(--dim); margin:0 0 10px; text-transform:uppercase; letter-spacing:1px; }
+    #timeline { list-style:none; margin:0; padding:0; }
+    #timeline li { display:flex; justify-content:space-between; gap:8px; padding:4px 0;
+                   border-bottom:1px dashed #232838; }
+    #timeline li.running { color:var(--accent); }
+    #timeline li.done { color:var(--fg); }
+    .dim { color:var(--dim); }
+    .warn { color:var(--warn); }
+    pre { white-space:pre-wrap; word-break:break-word; margin:0; }
+    #usage { margin-top:12px; padding-top:10px; border-top:1px solid #232838; font-size:13px; }
+    #status { color:var(--dim); font-size:13px; margin-left:auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ResearchSwarm</h1>
+    <input id="query" type="text" placeholder="输入研究问题，例如：AI Agent 的发展趋势" />
+    <button id="run">开始调研</button>
+    <button id="stop" class="ghost" disabled>停止</button>
+    <span id="status">就绪</span>
+  </header>
+
+  <main>
+    <section>
+      <h2>Agent 时间线</h2>
+      <ul id="timeline"></ul>
+      <!-- TODO(用户): 可以在这里加「补研回边」「评审重写」的可视化（事件类型 round_started / rewrite_started） -->
+      <div id="usage" class="dim">尚无运行</div>
+    </section>
+
+    <section>
+      <h2>研究报告</h2>
+      <pre id="report" class="dim">报告将在这里出现。</pre>
+      <!-- TODO(用户): 来源清单（GET /api/runs/{id} → sources）、失败项高亮（failures） -->
+      <div id="sources"></div>
+    </section>
+  </main>
+
+  <script>
+    // 状态：当前 run_id 与事件源
+    let runId = null;
+    let source = null;
+
+    const $ = (id) => document.getElementById(id);
+    const setStatus = (text) => { $("status").textContent = text; };
+
+    function addTimeline(agent, text, cls) {
+      const li = document.createElement("li");
+      li.className = cls || "";
+      li.innerHTML = `<span>${agent}</span><span class="dim">${text}</span>`;
+      $("timeline").appendChild(li);
+      li.scrollIntoView({ block: "nearest" });
+      return li;
+    }
+
+    // 把一条 RunEvent 渲染到界面上（事件结构见 docs/ui-plan.md）
+    function renderEvent(ev) {
+      switch (ev.type) {
+        case "run_started":
+          $("timeline").innerHTML = "";
+          addTimeline("run", `开始 · ${ev.data.query}`, "running");
+          break;
+        case "step_started": {
+          const li = addTimeline(ev.agent, "执行中…", "running");
+          li.dataset.agent = ev.agent;
+          break;
+        }
+        case "step_finished": {
+          const li = [...$("timeline").children].reverse()
+            .find((n) => n.dataset.agent === ev.agent && n.classList.contains("running"));
+          if (li) { li.className = "done"; li.lastElementChild.textContent = `${(ev.duration_ms / 1000).toFixed(1)}s`; }
+          break;
+        }
+        case "round_started":
+          addTimeline("补研", `第 ${ev.data.round} 轮（缺口 ${ev.data.gaps.length} / 失败 ${ev.data.failures.length}）`, "warn");
+          break;
+        case "rewrite_started":
+          addTimeline("评审", `打回重写 ${ev.data.revision}/${ev.data.max_revisions}`, "warn");
+          break;
+        case "run_cancelled":
+          addTimeline("取消", `阶段：${ev.data.stage}`, "warn");
+          break;
+        case "run_finished":
+          addTimeline("完成", ev.data.stop_reason, "done");
+          break;
+      }
+    }
+
+    async function loadResult(id) {
+      const res = await fetch(`/api/runs/${id}`);
+      const data = await res.json();
+      $("report").classList.remove("dim");
+      $("report").textContent = data.report || "(没有产出报告)";
+      const u = data.usage || {};
+      $("usage").textContent =
+        `状态：${data.status} · 总耗时 ${((data.duration_ms || 0) / 1000).toFixed(1)}s · ` +
+        `LLM ${u.calls || 0} 次 / ${u.total_tokens || 0} tokens`;
+      // TODO(用户): 渲染 data.sources（来源清单）与 data.failures（失败项）
+    }
+
+    function streamEvents(id) {
+      source = new EventSource(`/api/runs/${id}/events`);
+      source.onmessage = (msg) => renderEvent(JSON.parse(msg.data));
+      source.addEventListener("end", async () => {
+        source.close(); source = null;
+        $("run").disabled = false; $("stop").disabled = true;
+        setStatus("完成");
+        await loadResult(id);
+      });
+      source.onerror = () => { setStatus("事件流断开（服务是否已停止？）"); };
+    }
+
+    $("run").onclick = async () => {
+      const query = $("query").value.trim();
+      if (!query) return;
+      $("run").disabled = true; $("stop").disabled = false;
+      setStatus("运行中…");
+      const res = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setStatus(`启动失败：${err.detail || res.status}`);
+        $("run").disabled = false; $("stop").disabled = true;
+        return;
+      }
+      const data = await res.json();
+      runId = data.run_id;
+      setStatus(`运行中 · ${runId}`);
+      streamEvents(runId);
+    };
+
+    $("stop").onclick = async () => {
+      if (!runId) return;
+      $("stop").disabled = true;
+      setStatus("正在停止…（当前 LLM 调用结束后生效）");
+      await fetch(`/api/runs/${runId}/cancel`, { method: "POST" });
+    };
+  </script>
+</body>
+</html>

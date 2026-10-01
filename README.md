@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Tests](https://img.shields.io/badge/tests-92%20passed-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-100%20passed-brightgreen.svg)
 ![Quality](https://img.shields.io/badge/ruff%20%2B%20mypy-clean-blueviolet.svg)
 
 ---
@@ -34,7 +34,7 @@
 - **结构化输出加固**：`core/jsonx.py` 采用「多候选提取 + 括号配对扫描 + 字段校验」，`"approved": "true"`、`"score": "9"`、内容里含 ``` 都能正确解析。
   *验证：`tests/test_json_parsing.py`（27 个用例）。*
 - **可观测**：`history` 带时间戳与每步耗时，token 用量自动计量，运行结束用 rich 打汇总表。
-- **工程质量**：92 个 pytest 用例、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
+- **工程质量**：105 个 pytest 用例（100 通过 + 5 个事件契约用例待补齐）、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
 
 ---
 
@@ -164,13 +164,28 @@ python -m scripts.bench_research --live --tasks 5
 
 ---
 
+## 🖥️ Web 界面（M2）
+
+```bash
+python -m app.api --demo     # 离线演示：假 LLM + 假搜索，真实流水线；不联网、不花 token
+# 浏览器打开 http://127.0.0.1:8756/
+```
+
+- 后端：FastAPI + **SSE 事件流** —— 完整接口契约见 [docs/api.md](docs/api.md)
+- 前端：`web/index.html`（可运行的极简骨架：Agent 时间线 / 报告 / 停止按钮；界面仍在迭代）
+- 去掉 `--demo` 即真实调用；`--port` 可换端口
+- **停止**在步骤边界生效：当前 LLM 调用会跑完，已完成产出全部保留（事件流收到 `run_cancelled`）
+- 同时只允许一个运行（token 计量器是进程级的），并发请求返回 409
+
+---
+
 ## 🧪 测试与质量
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 92 passed
+pytest -q          # 100 passed, 5 skipped
 ruff check .       # All checks passed!
-mypy               # Success: no issues found in 14 source files
+mypy               # Success: no issues found in 15 source files
 ```
 
 | 测试文件 | 覆盖内容 |
@@ -184,6 +199,8 @@ mypy               # Success: no issues found in 14 source files
 | `test_observability.py` | 时间戳/耗时、token 计量（含并发累加）、汇总表 |
 | `test_replan.py` | 补研回边：触发条件、轮次上限、失败重试与撤销 |
 | `test_pipeline_offline.py` | 离线端到端：五角色齐全、报告带真实来源 |
+| `test_events.py` | 运行事件契约（范例已完成，5 个用例待补齐 —— 见 docstring 规格） |
+| `test_api.py` | HTTP/SSE 后端：静态前端与 API 共存、事件流完整、取消在步骤边界生效、并发 409、404/422 |
 
 CI 见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)（Python 3.10 / 3.12 矩阵）。
 
@@ -196,7 +213,10 @@ ResearchSwarm/
 ├── main.py                      # 入口薄壳：调用 app/cli，并向后兼容再导出 CLI 辅助函数
 ├── app/
 │   ├── __init__.py
-│   └── cli.py                   # 命令行前端：订阅事件流渲染进度 + 保存报告 + rich 汇总
+│   ├── cli.py                   # 命令行前端：订阅事件流渲染进度 + 保存报告 + rich 汇总
+│   └── api.py                   # FastAPI + SSE 后端（M2）；M3 会加 desktop.py（pywebview 开窗）
+├── web/
+│   └── index.html               # 前端骨架：Agent 时间线 / 报告 / 停止按钮（界面迭代中）
 ├── service/
 │   ├── __init__.py
 │   └── events.py                # 运行事件契约（结构化、零依赖、跨线程安全）
@@ -216,9 +236,10 @@ ResearchSwarm/
 │   ├── demo_offline.py          # 无 API Key 的离线演示
 │   ├── smoke_llm.py             # 手工冒烟：真实调一次 LLM
 │   └── smoke_search.py          # 手工冒烟：真实调一次搜索
-├── tests/                       # 92 个 pytest 用例
+├── tests/                       # 105 个 pytest 用例（100 通过 + 5 待补齐）
 ├── docs/benchmark.md            # 由脚本生成的性能表格
 ├── docs/ui-plan.md              # UI 化改造方案（事件契约/取消语义/M1–M4 里程碑）
+├── docs/api.md                  # HTTP/SSE 接口契约（M2 前端对接用）
 ├── examples/sample-report.md    # 示例报告
 ├── notes/                       # 运行产物（gitignore）
 ├── pyproject.toml               # ruff / mypy 配置
@@ -242,7 +263,7 @@ ResearchSwarm/
 - [x] **补研回边**：Analyst 报缺口 → Planner 追加子任务再调研（真正的多 Agent 协作）
 - [x] **可观测**：每步耗时、token 用量、执行日志带时间戳
 - [x] **可复现性能测量**：`scripts/bench_research.py`
-- [x] **测试与 CI**：92 个用例 + ruff/mypy + 双版本矩阵
+- [x] **测试与 CI**：105 个用例（100 通过 + 5 个事件契约用例待补齐，含 HTTP/SSE 后端测试）+ ruff/mypy + 双版本矩阵
 - [ ] **Web UI**：Streamlit / FastAPI 展示 Agent 实时协作过程
 - [ ] **持久化记忆**：`SwarmState` 落库，支持中断恢复
 - [ ] **更多工具**：PDF 解析、代码执行、图表生成
