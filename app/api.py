@@ -16,10 +16,10 @@ python -m app.api                  # 真实调用（需要 .env 里的 LLM/搜�
 python -m app.api --demo           # 离线演示：桩客户端 + 真实流水线，不联网、不花 token
 python -m app.api --port 8756      # 换端口
 
-已知限制（M4 处理）
+已知限制
 ------------------
 `core.llm.USAGE` 是**进程级**计量器、每次运行前 reset，所以同时只允许一个运行；
-并发请求返回 409。M4 会把它改成「按运行独立计量」。
+并发请求返回 409。原计划的「按运行独立计量」尚未实现（M4 未包含此项）。
 """
 
 from __future__ import annotations
@@ -157,7 +157,10 @@ class RunRecord:
 
 
 class RunRegistry:
-    """内存运行注册表（M4 会换成 SQLite 持久化）。"""
+    """内存运行注册表：只放**实时**状态（最近 MAX_KEPT_RUNS 条）。
+
+    已结束的运行由 core.storage 归档到 SQLite，所以这里不需要换成持久化实现。
+    """
 
     def __init__(self) -> None:
         self._runs: dict[str, RunRecord] = {}

@@ -44,7 +44,7 @@ agents/ tools.py 真实 Agent 与工具层
 - `run_swarm(query, on_event=..., cancel=threading.Event())`
 - 只在**步骤边界**检查（每个 Agent 调用前后）。置位后：已完成步骤与产出**全部保留**，
   立即返回，`state.cancelled = True`，并发出 `run_cancelled`。
-- **不**强杀正在进行的 LLM 调用（要做得引入流式请求 + 超时，留到 M4）。
+- **不**强杀正在进行的 LLM 调用（要做得引入流式请求 + 超时）。⚠️ 原计划留到 M4，但 **M4 已完成且未包含此项** —— 该能力至今未实现。
 - Researcher 内部的 `ThreadPoolExecutor` 无法中途取消，同样在下一轮边界生效。
 
 ## 里程碑与验收标准
