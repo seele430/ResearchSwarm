@@ -147,15 +147,25 @@ python -m scripts.demo_offline     # 用假 LLM 客户端跑真实流水线（�
 > 条件：离线桩（固定延迟：搜索 0.8s / 抓正文 0.3s / 提炼 1.0s）、5 个子任务、2 次取中位数、Python 3.12.7。
 > 完整表格见 [`docs/benchmark.md`](docs/benchmark.md)；复现：`python -m scripts.bench_research --tasks 5 --repeat 2`
 
-### 为什么真实 API 下远达不到 5x？
+### 真实 API 下能拿到多少加速？
 
-离线桩测的是**调度效率的上界**。真实环境还要受下游服务影响 —— 本项目早期在真实 API 下的实测是 **46 秒 → 23 秒（2.0x）**：
+**同一个脚本加 `--live` 就能测**，但结果随下游状态波动很大，所以别把它当成一个固定数字：
+
+| 测量时间 | 串联 | 并联 | 加速比 |
+|---------|------|------|--------|
+| 2026-10-07 | 36.84 s | 7.21 s | **5.11x** |
+| 项目早期 | 46 s | 23 s | 2.0x |
+
+两次测的是**同一件事**（Researcher 阶段、5 子任务、取中位数），结果却相差约 2.5 倍 ——
+这说明该加速比高度依赖测量时下游的承载状态，而不是一个常数。可能压低收益的因素：
 
 1. 搜索 API 对同一 IP 有并发限制
 2. 多个请求共享同一出口带宽
 3. 子任务耗时不均，快的要等慢的
 
-**结论**：并行不是免费的，`RESEARCH_MAX_WORKERS` 要按下游承载能力来设。
+完整输出见 [`docs/benchmark-live.md`](docs/benchmark-live.md)。
+
+**结论**：并行不是免费的，`RESEARCH_MAX_WORKERS` 要**实测**下游承载能力来设，而不是照抄一个数字。
 
 ```bash
 # 用真实 API 测（会消耗 token）
@@ -285,7 +295,8 @@ ResearchSwarm/
 │   ├── smoke_llm.py             # 手工冒烟：真实调一次 LLM
 │   └── smoke_search.py          # 手工冒烟：真实调一次搜索
 ├── tests/                       # 140 个 pytest 用例（全部通过）
-├── docs/benchmark.md            # 由脚本生成的性能表格
+├── docs/benchmark.md            # 由脚本生成的性能表格（离线桩，可复现）
+├── docs/benchmark-live.md       # 由脚本生成的性能表格（真实 API，随下游波动）
 ├── docs/ui-plan.md              # UI 化改造方案（事件契约/取消语义/M1–M4 里程碑）
 ├── docs/api.md                  # HTTP/SSE 接口契约（M2 前端对接用）
 ├── examples/sample-report.md    # 示例报告
