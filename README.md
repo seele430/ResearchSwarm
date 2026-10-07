@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Tests](https://img.shields.io/badge/tests-133%20passed-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-140%20passed-brightgreen.svg)
 ![Quality](https://img.shields.io/badge/ruff%20%2B%20mypy-clean-blueviolet.svg)
 
 ---
@@ -34,7 +34,7 @@
 - **结构化输出加固**：`core/jsonx.py` 采用「多候选提取 + 括号配对扫描 + 字段校验」，`"approved": "true"`、`"score": "9"`、内容里含 ``` 都能正确解析。
   *验证：`tests/test_json_parsing.py`（27 个用例）。*
 - **可观测**：`history` 带时间戳与每步耗时，token 用量自动计量，运行结束用 rich 打汇总表。
-- **工程质量**：**133 个 pytest 用例全部通过**、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
+- **工程质量**：**140 个 pytest 用例全部通过**、`ruff` + `mypy` 全绿、GitHub Actions 双版本矩阵。
 
 ---
 
@@ -220,7 +220,7 @@ venv\Scripts\python.exe scripts\build_exe.py --console    # 控制台调试版�
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 133 passed
+pytest -q          # 140 passed
 ruff check .       # All checks passed!
 mypy               # Success: no issues found in 21 source files
 ```
@@ -284,11 +284,12 @@ ResearchSwarm/
 │   ├── demo_offline.py          # 无 API Key 的离线演示
 │   ├── smoke_llm.py             # 手工冒烟：真实调一次 LLM
 │   └── smoke_search.py          # 手工冒烟：真实调一次搜索
-├── tests/                       # 133 个 pytest 用例（全部通过）
+├── tests/                       # 140 个 pytest 用例（全部通过）
 ├── docs/benchmark.md            # 由脚本生成的性能表格
 ├── docs/ui-plan.md              # UI 化改造方案（事件契约/取消语义/M1–M4 里程碑）
 ├── docs/api.md                  # HTTP/SSE 接口契约（M2 前端对接用）
 ├── examples/sample-report.md    # 示例报告
+├── examples/demo-offline-output.md  # 离线 demo 输出（含来源清单格式）
 ├── notes/                       # 运行产物（gitignore）
 ├── pyproject.toml               # ruff / mypy 配置
 ├── pytest.ini
@@ -311,8 +312,8 @@ ResearchSwarm/
 - [x] **补研回边**：Analyst 报缺口 → Planner 追加子任务再调研（真正的多 Agent 协作）
 - [x] **可观测**：每步耗时、token 用量、执行日志带时间戳
 - [x] **可复现性能测量**：`scripts/bench_research.py`
-- [x] **测试与 CI**：105 个用例（100 通过 + 5 个事件契约用例待补齐，含 HTTP/SSE 后端测试）+ ruff/mypy + 双版本矩阵
-- [ ] **Web UI**：Streamlit / FastAPI 展示 Agent 实时协作过程
+- [x] **测试与 CI**：140 个用例（含 HTTP/SSE 后端测试与事件契约测试）+ ruff/mypy + 双版本矩阵
+- [x] **Web UI**：FastAPI + SSE 实时展示 Agent 协作过程（M2 已完成）
 - [ ] **持久化记忆**：`SwarmState` 落库，支持中断恢复
 - [ ] **更多工具**：PDF 解析、代码执行、图表生成
 - [ ] **评估体系**：用 RAGAS 等框架量化报告质量
